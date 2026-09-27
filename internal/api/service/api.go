@@ -50,14 +50,24 @@ func (s *JobsService) Run() error {
 	ctx := context.Background()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	// Limit in-flight jobs to WorkerN (lease batch size alone is not a pool).
+	slots := make(chan struct{}, s.n)
 	for range ticker.C {
-		jobs, err := s.repo.Jobs.Lease(ctx, s.n, jobLease)
+		free := s.n - len(slots)
+		if free <= 0 {
+			continue
+		}
+		jobs, err := s.repo.Jobs.Lease(ctx, free, jobLease)
 		if err != nil {
 			s.log.Error("lease", zap.Error(err))
 			continue
 		}
 		for _, j := range jobs {
-			go s.handle(j)
+			slots <- struct{}{}
+			go func(j *job.Job) {
+				defer func() { <-slots }()
+				s.handle(j)
+			}(j)
 		}
 	}
 	return nil
@@ -93,5 +103,7 @@ func (s *JobsService) handle(j *job.Job) {
 		msg = err.Error()
 		s.log.Error("job", zap.Error(err), zap.String("job", j.ID.String()))
 	}
-	_ = s.repo.Jobs.Complete(context.Background(), j.ID, st, msg)
+	if err := s.repo.Jobs.Complete(context.Background(), j.ID, st, msg); err != nil {
+		s.log.Error("complete job", zap.Error(err), zap.String("job", j.ID.String()))
+	}
 }

@@ -30,7 +30,10 @@ func (h *Hub) Unsubscribe(ch chan []byte) {
 }
 
 func (h *Hub) Publish(event string, payload any) {
-	body, _ := json.Marshal(map[string]any{"event": event, "payload": payload})
+	body, err := json.Marshal(map[string]any{"event": event, "payload": payload})
+	if err != nil {
+		return
+	}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for ch := range h.subs {

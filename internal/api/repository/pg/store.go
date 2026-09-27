@@ -54,20 +54,25 @@ func (s *Store) ApplySchema(ctx context.Context) error {
 	}
 	if ledgerCount == 0 {
 		var hasColumns bool
-		_ = s.db.Pool.QueryRow(ctx, `
+		if err := s.db.Pool.QueryRow(ctx, `
 			SELECT EXISTS (
 				SELECT 1 FROM information_schema.tables
 				WHERE table_schema='public' AND table_name='columns'
-			)`).Scan(&hasColumns)
+			)`).Scan(&hasColumns); err != nil {
+			return err
+		}
 		if hasColumns {
-			// Existing DB from pre-ledger era: stamp current files as applied, do not re-run data UPDATEs.
+			// Pre-ledger DB: stamp only baseline schema files, then apply later
+			// migrations (they use IF NOT EXISTS). Avoids skipping 002+.
 			for _, name := range entries {
 				base := migrationBase(name)
+				if !isBaselineMigration(base) {
+					continue
+				}
 				if _, err := s.db.Pool.Exec(ctx, `INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING`, base); err != nil {
 					return err
 				}
 			}
-			return nil
 		}
 	}
 
@@ -108,6 +113,10 @@ func migrationBase(name string) string {
 		return name[i+1:]
 	}
 	return name
+}
+
+func isBaselineMigration(base string) bool {
+	return strings.HasPrefix(base, "000_") || strings.HasPrefix(base, "001_")
 }
 
 func (s *Store) SeedLLM(ctx context.Context, base, key, model string) error {
@@ -397,7 +406,7 @@ const maxJobAttempts = 8
 
 func (s *Store) LeaseJobs(ctx context.Context, n int, lease time.Duration) ([]*job.Job, error) {
 	// Permanently fail jobs that exceeded attempt budget; reset stuck tasks.
-	_, _ = s.db.Pool.Exec(ctx, `
+	if _, err := s.db.Pool.Exec(ctx, `
 		WITH exhausted AS (
 			UPDATE jobs SET status='failed', last_error='max attempts exceeded', updated_at=now()
 			WHERE (status='queued' OR (status='running' AND leased_until < now()))
@@ -406,7 +415,9 @@ func (s *Store) LeaseJobs(ctx context.Context, n int, lease time.Duration) ([]*j
 		)
 		UPDATE tasks SET execution_status='failed', updated_at=now()
 		WHERE id IN (SELECT task_id FROM exhausted)
-		  AND execution_status IN ('queued','running')`, maxJobAttempts)
+		  AND execution_status IN ('queued','running')`, maxJobAttempts); err != nil {
+		return nil, err
+	}
 
 	tx, err := s.db.Pool.Begin(ctx)
 	if err != nil {
@@ -446,9 +457,11 @@ func (s *Store) LeaseJobs(ctx context.Context, n int, lease time.Duration) ([]*j
 	for _, c := range cands {
 		if c.oldStatus == "running" {
 			// Dead worker reclaim: put task back to queued so MarkRunning succeeds.
-			_, _ = tx.Exec(ctx, `
+			if _, err := tx.Exec(ctx, `
 				UPDATE tasks SET execution_status='queued', updated_at=now()
-				WHERE id=$1 AND execution_status='running'`, c.taskID)
+				WHERE id=$1 AND execution_status='running'`, c.taskID); err != nil {
+				return nil, err
+			}
 		}
 		j := &job.Job{}
 		var st string

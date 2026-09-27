@@ -45,10 +45,7 @@ func FetchConfluencePage(ctx context.Context, base, email, token, pageRef string
 	}
 	_ = json.Unmarshal([]byte(stripStatus(raw)), &parsed)
 	text := parsed.Title + "\n" + parsed.Body.Storage.Value
-	if len(text) > 12000 {
-		text = text[:12000] + "\n…"
-	}
-	return text, nil
+	return truncate(text, 12000), nil
 }
 
 func PostConfluenceComment(ctx context.Context, base, email, token, pageRef, htmlBody string) (string, error) {
@@ -231,10 +228,13 @@ func doJSON(ctx context.Context, method, rawURL string, headers map[string]strin
 		return "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 32*1024))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 32*1024))
+	if err != nil {
+		return "", err
+	}
 	out := fmt.Sprintf("status=%d body=%s", resp.StatusCode, string(data))
 	if resp.StatusCode >= 300 {
-		return out, fmt.Errorf("%s", out)
+		return out, fmt.Errorf("http %d: %s", resp.StatusCode, string(data))
 	}
 	return out, nil
 }

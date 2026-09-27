@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -157,15 +158,26 @@ func ensureRepo(ctx context.Context, repo, dir, branch string) error {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		_ = exec.CommandContext(ctx, "git", "-C", dir, "remote", "set-url", "origin", repo).Run()
 		_ = exec.CommandContext(ctx, "git", "-C", dir, "fetch", "origin", "--prune").Run()
-		_ = exec.CommandContext(ctx, "git", "-C", dir, "checkout", "-B", branch).Run()
+		// Prefer existing local branch (keep agent commits). Only create from origin when missing.
+		if err := exec.CommandContext(ctx, "git", "-C", dir, "checkout", branch).Run(); err != nil {
+			if err := exec.CommandContext(ctx, "git", "-C", dir, "checkout", "-B", branch, "origin/"+branch).Run(); err != nil {
+				_ = exec.CommandContext(ctx, "git", "-C", dir, "checkout", "-B", branch).Run()
+			}
+		}
 		return nil
 	}
 	_ = os.MkdirAll(filepath.Dir(dir), 0o755)
-	cmd := exec.CommandContext(ctx, "git", "clone", repo, dir)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("clone: %s %w", out, err)
+	cmd := exec.CommandContext(ctx, "git", "clone", "--branch", branch, "--single-branch", repo, dir)
+	if _, err := cmd.CombinedOutput(); err != nil {
+		_ = os.RemoveAll(dir)
+		cmd = exec.CommandContext(ctx, "git", "clone", repo, dir)
+		if out, err2 := cmd.CombinedOutput(); err2 != nil {
+			return fmt.Errorf("clone: %s %w", out, err2)
+		}
+		if err := exec.CommandContext(ctx, "git", "-C", dir, "checkout", "-B", branch, "origin/"+branch).Run(); err != nil {
+			_ = exec.CommandContext(ctx, "git", "-C", dir, "checkout", "-B", branch).Run()
+		}
 	}
-	_ = exec.CommandContext(ctx, "git", "-C", dir, "checkout", "-B", branch).Run()
 	return nil
 }
 
@@ -179,23 +191,14 @@ func RefreshTaskWorktree(ctx context.Context, workDir, repoURL, branch, base str
 		return err
 	}
 	if base != "" && base != branch {
-		_ = exec.CommandContext(ctx, "git", "-C", dir, "fetch", "origin", base+":"+base).Run()
+		// Force-update local base tip even if history was rewritten.
+		_ = exec.CommandContext(ctx, "git", "-C", dir, "fetch", "origin", "+"+base+":"+base).Run()
 	}
 	return nil
 }
 
 func EnsureTaskBranch(ctx context.Context, workDir, repoURL, defaultBranch, taskBranch string) error {
-	if repoURL == "" {
-		return nil
-	}
-	dir := filepath.Join(workDir, taskBranch)
-	if err := ensureRepo(ctx, repoURL, dir, taskBranch); err != nil {
-		return err
-	}
-	if defaultBranch != "" && defaultBranch != taskBranch {
-		_ = exec.CommandContext(ctx, "git", "-C", dir, "fetch", "origin", defaultBranch+":"+defaultBranch).Run()
-	}
-	return nil
+	return RefreshTaskWorktree(ctx, workDir, repoURL, taskBranch, defaultBranch)
 }
 
 var secretPathFragments = []string{
@@ -236,17 +239,15 @@ func safeGitAdd(ctx context.Context, dir string) error {
 			skipped++
 			continue
 		}
-		_ = exec.CommandContext(ctx, "git", "-C", dir, "add", "--", path).Run()
+		if err := exec.CommandContext(ctx, "git", "-C", dir, "add", "--", path).Run(); err != nil {
+			continue
+		}
 		added++
 	}
 	if added == 0 && skipped > 0 {
 		return fmt.Errorf("refused to stage %d secret-looking path(s); nothing left to commit", skipped)
 	}
 	return nil
-}
-
-type Publisher interface {
-	Publish(event string, payload any)
 }
 
 func JiraTools(base, email, token string) []Tool {
@@ -309,20 +310,13 @@ func (t confluenceWriteTool) Call(ctx context.Context, args string) (string, err
 	}
 	_ = json.Unmarshal([]byte(args), &p)
 	if t.kind == "comment" {
-		htmlBody := "<pre>" + htmlEscape(p.Body) + "</pre>"
+		htmlBody := "<pre>" + html.EscapeString(p.Body) + "</pre>"
 		return PostConfluenceComment(ctx, t.base, t.email, t.token, p.ID, htmlBody)
 	}
 	if p.Heading == "" {
 		p.Heading = "Kaiban"
 	}
 	return AppendConfluencePage(ctx, t.base, t.email, t.token, p.ID, "kaiban:agent", p.Heading, p.Body)
-}
-
-func htmlEscape(s string) string {
-	s = strings.ReplaceAll(s, "&", "&amp;")
-	s = strings.ReplaceAll(s, "<", "&lt;")
-	s = strings.ReplaceAll(s, ">", "&gt;")
-	return s
 }
 
 func GitLabTools(base, token string) []Tool {

@@ -7,6 +7,9 @@ func NewLogger() (*zap.Logger, error) {
 }
 
 func NewFallbackLogger() *zap.Logger {
-	l, _ := zap.NewDevelopment()
+	l, err := zap.NewDevelopment()
+	if err != nil {
+		return zap.NewNop()
+	}
 	return l
 }

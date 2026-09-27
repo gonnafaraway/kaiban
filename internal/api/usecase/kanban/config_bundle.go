@@ -256,6 +256,12 @@ func (u *UseCase) replaceMCP(ctx context.Context, items []ExportedMCPServer) err
 		status := mcpserver.Status(item.Status)
 		if status == "" {
 			status = mcpserver.StatusDisabled
+		} else {
+			parsed, err := parseMCPStatus(string(status))
+			if err != nil {
+				return err
+			}
+			status = parsed
 		}
 		headers := scrubSecretMap(item.Headers)
 		caps := item.Capabilities

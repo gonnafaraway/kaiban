@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://github.com/gonnafaraway/kaiban/stargazers"><img src="https://img.shields.io/github/stars/gonnafaraway/kaiban?style=flat&color=0F6CBD" alt="Stars"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License"/></a>
-  <a href="go.mod"><img src="https://img.shields.io/badge/Go-1.24-00ADD8?logo=go&logoColor=white" alt="Go"/></a>
+  <a href="go.mod"><img src="https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white" alt="Go"/></a>
   <a href="frontend/package.json"><img src="https://img.shields.io/badge/Next.js-15-black?logo=nextdotjs&logoColor=white" alt="Next.js"/></a>
   <a href="docker-compose.yml"><img src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" alt="Docker"/></a>
   <img src="https://img.shields.io/badge/UI-RU%20%7C%20EN-479EF5" alt="i18n"/>
@@ -188,7 +188,7 @@ flowchart LR
 
 | Layer | Stack |
 | --- | --- |
-| API | Go 1.24, Fiber, Clean Architecture ([go-arch-template](https://github.com/gonnafaraway/go-arch-template)) |
+| API | Go 1.27, Fiber, Clean Architecture ([go-arch-template](https://github.com/gonnafaraway/go-arch-template)) |
 | UI | Next.js 15 App Router, TypeScript, Feature-Sliced Design |
 | Data | PostgreSQL 16, in-process job workers (`SKIP LOCKED`) |
 | Realtime | Server-Sent Events |

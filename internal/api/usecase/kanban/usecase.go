@@ -287,8 +287,7 @@ func (u *UseCase) Run(ctx context.Context, id uuid.UUID) (*task.Task, error) {
 		_ = u.Repo.Tasks.Update(ctx, t)
 		return nil, err
 	}
-	me, _ := u.Repo.Users.GetLocal(ctx)
-	_ = u.audit(ctx, &t.ID, auditevent.ActorUser, me.Login, "agent.started", nil)
+	_ = u.audit(ctx, &t.ID, auditevent.ActorUser, u.localActor(ctx), "agent.started", nil)
 	u.publish("task.updated", t)
 	u.agentLog(t.ID, "status", "Задача в очереди, ожидает воркер", nil)
 	return t, nil
@@ -337,8 +336,7 @@ func (u *UseCase) Approve(ctx context.Context, id uuid.UUID, comment string) (*t
 	if err := u.Repo.Tasks.Update(ctx, t); err != nil {
 		return nil, err
 	}
-	me, _ := u.Repo.Users.GetLocal(ctx)
-	_ = u.audit(ctx, &t.ID, auditevent.ActorUser, me.Login, "user.approved", map[string]any{"comment": comment})
+	_ = u.audit(ctx, &t.ID, auditevent.ActorUser, u.localActor(ctx), "user.approved", map[string]any{"comment": comment})
 	u.publish("task.updated", t)
 	return t, nil
 }
@@ -355,8 +353,7 @@ func (u *UseCase) Retry(ctx context.Context, id uuid.UUID, comment string) (*tas
 	if err := u.Repo.Tasks.Update(ctx, t); err != nil {
 		return nil, err
 	}
-	me, _ := u.Repo.Users.GetLocal(ctx)
-	_ = u.audit(ctx, &t.ID, auditevent.ActorUser, me.Login, "user.retried", map[string]any{"comment": comment})
+	_ = u.audit(ctx, &t.ID, auditevent.ActorUser, u.localActor(ctx), "user.retried", map[string]any{"comment": comment})
 	u.publish("task.updated", t)
 	return t, nil
 }
@@ -381,8 +378,7 @@ func (u *UseCase) ReturnTo(ctx context.Context, id, columnID uuid.UUID, comment 
 	if err := u.Repo.Tasks.Update(ctx, t); err != nil {
 		return nil, err
 	}
-	me, _ := u.Repo.Users.GetLocal(ctx)
-	_ = u.audit(ctx, &t.ID, auditevent.ActorUser, me.Login, "user.returned", map[string]any{"comment": comment, "column_id": columnID.String()})
+	_ = u.audit(ctx, &t.ID, auditevent.ActorUser, u.localActor(ctx), "user.returned", map[string]any{"comment": comment, "column_id": columnID.String()})
 	u.publish("task.updated", t)
 	return t, nil
 }
@@ -399,8 +395,7 @@ func (u *UseCase) Archive(ctx context.Context, id uuid.UUID) (*task.Task, error)
 	if err := u.Repo.Tasks.Update(ctx, t); err != nil {
 		return nil, err
 	}
-	me, _ := u.Repo.Users.GetLocal(ctx)
-	_ = u.audit(ctx, &t.ID, auditevent.ActorUser, me.Login, "task.archived", nil)
+	_ = u.audit(ctx, &t.ID, auditevent.ActorUser, u.localActor(ctx), "task.archived", nil)
 	u.publish("task.updated", t)
 	return t, nil
 }
@@ -416,8 +411,7 @@ func (u *UseCase) Unarchive(ctx context.Context, id uuid.UUID) (*task.Task, erro
 	if err := u.Repo.Tasks.Update(ctx, t); err != nil {
 		return nil, err
 	}
-	me, _ := u.Repo.Users.GetLocal(ctx)
-	_ = u.audit(ctx, &t.ID, auditevent.ActorUser, me.Login, "task.unarchived", nil)
+	_ = u.audit(ctx, &t.ID, auditevent.ActorUser, u.localActor(ctx), "task.unarchived", nil)
 	u.publish("task.updated", t)
 	return t, nil
 }
@@ -546,6 +540,27 @@ func (u *UseCase) TestIntegration(ctx context.Context, id uuid.UUID) (*domint.In
 			item.Status = domint.StatusError
 			item.LastError = err.Error()
 		} else {
+			email, tok := integrationCreds(item)
+			switch item.Type {
+			case domint.TypeJira, domint.TypeConfluence:
+				if email != "" || tok != "" {
+					for k, v := range integration.AtlassianAuth(email, tok) {
+						req.Header.Set(k, v)
+					}
+				}
+			case domint.TypeGitLab:
+				if tok != "" {
+					for k, v := range integration.GitLabAuth(tok) {
+						req.Header.Set(k, v)
+					}
+				}
+			case domint.TypeGitHub:
+				if tok != "" {
+					for k, v := range integration.GitHubAuth(tok) {
+						req.Header.Set(k, v)
+					}
+				}
+			}
 			client := &http.Client{Timeout: 10 * time.Second}
 			resp, err := client.Do(req)
 			if err != nil {
@@ -553,7 +568,7 @@ func (u *UseCase) TestIntegration(ctx context.Context, id uuid.UUID) (*domint.In
 				item.LastError = err.Error()
 			} else {
 				_ = resp.Body.Close()
-				if resp.StatusCode >= 500 {
+				if resp.StatusCode >= 400 {
 					item.Status = domint.StatusError
 					item.LastError = fmt.Sprintf("HTTP %d", resp.StatusCode)
 				} else {
@@ -575,6 +590,14 @@ func (u *UseCase) ListMCP(ctx context.Context) ([]*mcpserver.Server, error) {
 
 func (u *UseCase) UpsertMCP(ctx context.Context, id *uuid.UUID, name, endpoint string, headers map[string]string, status string) (*mcpserver.Server, error) {
 	now := time.Now().UTC()
+	var st mcpserver.Status
+	if status != "" {
+		parsed, err := parseMCPStatus(status)
+		if err != nil {
+			return nil, err
+		}
+		st = parsed
+	}
 	if id != nil {
 		s, err := u.Repo.MCP.Get(ctx, *id)
 		if err != nil {
@@ -590,7 +613,7 @@ func (u *UseCase) UpsertMCP(ctx context.Context, id *uuid.UUID, name, endpoint s
 			s.Headers = headers
 		}
 		if status != "" {
-			s.Status = mcpserver.Status(status)
+			s.Status = st
 		}
 		s.UpdatedAt = now
 		if err := u.Repo.MCP.Update(ctx, s); err != nil {
@@ -600,7 +623,7 @@ func (u *UseCase) UpsertMCP(ctx context.Context, id *uuid.UUID, name, endpoint s
 	}
 	s := &mcpserver.Server{ID: uuid.New(), Name: name, Endpoint: endpoint, Headers: headers, Capabilities: map[string]any{}, Status: mcpserver.StatusDisabled, CreatedAt: now, UpdatedAt: now}
 	if status != "" {
-		s.Status = mcpserver.Status(status)
+		s.Status = st
 	}
 	if err := u.Repo.MCP.Create(ctx, s); err != nil {
 		return nil, err
@@ -906,10 +929,7 @@ Previous reports:
 	var syncNotes []string
 	if jiraInt != nil && arts.JiraIssue != "" {
 		email, tok := integrationCreds(jiraInt)
-		excerpt := report
-		if len(excerpt) > 2500 {
-			excerpt = excerpt[:2500] + "…"
-		}
+		excerpt := truncateRunes(report, 2500)
 		if _, err := integration.PostJiraComment(ctx, jiraInt.BaseURL, email, tok, arts.JiraIssue,
 			fmt.Sprintf("[Kaiban] Колонка «%s» завершена (%s).\n\n%s", col.Name, t.Title, excerpt)); err != nil {
 			syncNotes = append(syncNotes, "Jira comment: "+err.Error())
@@ -921,10 +941,7 @@ Previous reports:
 	}
 	if confInt != nil && arts.ConfluenceURL != "" {
 		email, tok := integrationCreds(confInt)
-		excerpt := report
-		if len(excerpt) > 2500 {
-			excerpt = excerpt[:2500] + "…"
-		}
+		excerpt := truncateRunes(report, 2500)
 		commentHTML := "<p><strong>Kaiban / " + html.EscapeString(col.Name) + "</strong>: " + html.EscapeString(t.Title) + "</p><pre>" + html.EscapeString(excerpt) + "</pre>"
 		if _, err := integration.PostConfluenceComment(ctx, confInt.BaseURL, email, tok, arts.ConfluenceURL, commentHTML); err != nil {
 			syncNotes = append(syncNotes, "Confluence comment: "+err.Error())
@@ -1046,7 +1063,7 @@ Previous reports:
 		})
 		u.publish("task.updated", t)
 		u.publish("agent.finished", map[string]any{"task_id": t.ID, "run_id": ar.run.ID.String()})
-		return nil
+		return fmt.Errorf("%s", reason)
 	}
 	if stopReason != "" {
 		report += "\n\n## Budget\n- Stopped: " + stopReason
@@ -1065,7 +1082,7 @@ Previous reports:
 		})
 		u.publish("task.updated", t)
 		u.publish("agent.finished", map[string]any{"task_id": t.ID, "run_id": ar.run.ID.String()})
-		return nil
+		return fmt.Errorf("%s", stopReason)
 	}
 	u.finishRun(ctx, ar, agentrun.StatusSucceeded, "completed")
 	u.runLog(ctx, ar, t.ID, "status", "Прогон завершён", map[string]any{
@@ -1267,6 +1284,14 @@ func (u *UseCase) integrationByType(ctx context.Context, typ domint.Type) *domin
 	return nil
 }
 
+func (u *UseCase) localActor(ctx context.Context) string {
+	me, err := u.Repo.Users.GetLocal(ctx)
+	if err != nil || me == nil {
+		return "local"
+	}
+	return me.Login
+}
+
 func integrationCreds(i *domint.Integration) (email, token string) {
 	if i == nil {
 		return "", ""
@@ -1277,6 +1302,16 @@ func integrationCreds(i *domint.Integration) (email, token string) {
 		token = i.Credentials["token"]
 	}
 	return email, token
+}
+
+func parseMCPStatus(s string) (mcpserver.Status, error) {
+	st := mcpserver.Status(strings.TrimSpace(s))
+	switch st {
+	case mcpserver.StatusDisabled, mcpserver.StatusEnabled, mcpserver.StatusError:
+		return st, nil
+	default:
+		return "", fmt.Errorf("invalid mcp status %q", s)
+	}
 }
 
 func truncateRunes(s string, n int) string {

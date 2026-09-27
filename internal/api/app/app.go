@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"kaiban/internal/api/env"
 	"kaiban/internal/api/handlers"
 	"kaiban/internal/api/infrastructure/local/log"
@@ -22,6 +24,7 @@ func Run() error {
 	logger, err := log.NewLogger()
 	if err != nil {
 		logger = log.NewFallbackLogger()
+		logger.Warn("using fallback logger", zap.Error(err))
 	}
 
 	storages, err := storage.PrepareStorage(e)

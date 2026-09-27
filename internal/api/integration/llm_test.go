@@ -39,3 +39,13 @@ func TestParseChatStream_toolCalls(t *testing.T) {
 		t.Fatalf("args %q", msg.ToolCalls[0].Function.Arguments)
 	}
 }
+
+func TestTruncateRunes(t *testing.T) {
+	got := truncate("абвгде", 3)
+	if got != "абв..." {
+		t.Fatalf("got %q", got)
+	}
+	if truncate("short", 10) != "short" {
+		t.Fatal("short unchanged")
+	}
+}

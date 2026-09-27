@@ -54,7 +54,7 @@ func Register(app *fiber.App, d Deps) {
 	v1.Get("/runs/:id", d.getRun)
 	v1.Post("/tasks/:id/run", d.run)
 	v1.Post("/tasks/:id/approve", d.approve)
-	v1.Post("/tasks/:id/return", d.ret)
+	v1.Post("/tasks/:id/return", d.returnTo)
 	v1.Post("/tasks/:id/retry", d.retry)
 	v1.Post("/tasks/:id/archive", d.archive)
 	v1.Post("/tasks/:id/unarchive", d.unarchive)
@@ -159,9 +159,9 @@ func (d Deps) createColumn(c *fiber.Ctx) error {
 }
 
 func (d Deps) patchColumn(c *fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
 	if err != nil {
-		return httptransport.JSONError(c, 400, "bad_request", "invalid id")
+		return err
 	}
 	var body struct {
 		Name                 *string               `json:"name"`
@@ -183,7 +183,10 @@ func (d Deps) patchColumn(c *fiber.Ctx) error {
 }
 
 func (d Deps) deleteColumn(c *fiber.Ctx) error {
-	id, _ := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
 	if err := d.UC.DeleteColumn(c.Context(), id); err != nil {
 		return httptransport.JSONError(c, 409, "conflict", err.Error())
 	}
@@ -191,7 +194,10 @@ func (d Deps) deleteColumn(c *fiber.Ctx) error {
 }
 
 func (d Deps) resetOverlay(c *fiber.Ctx) error {
-	id, _ := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
 	col, err := d.UC.ResetOverlay(c.Context(), id)
 	if err != nil {
 		return httptransport.JSONError(c, 400, "bad_request", err.Error())
@@ -200,7 +206,10 @@ func (d Deps) resetOverlay(c *fiber.Ctx) error {
 }
 
 func (d Deps) restoreDefault(c *fiber.Ctx) error {
-	id, _ := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
 	col, err := d.UC.RestoreDefault(c.Context(), id)
 	if err != nil {
 		return httptransport.JSONError(c, 400, "bad_request", err.Error())
@@ -267,7 +276,10 @@ func (d Deps) createTask(c *fiber.Ctx) error {
 }
 
 func (d Deps) getTask(c *fiber.Ctx) error {
-	id, _ := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
 	t, reports, err := d.UC.GetTask(c.Context(), id)
 	if err != nil {
 		return httptransport.JSONError(c, 404, "not_found", err.Error())
@@ -276,9 +288,9 @@ func (d Deps) getTask(c *fiber.Ctx) error {
 }
 
 func (d Deps) taskDiff(c *fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
 	if err != nil {
-		return httptransport.JSONError(c, 400, "bad_request", "invalid id")
+		return err
 	}
 	out, err := d.UC.TaskDiff(c.Context(), id)
 	if err != nil {
@@ -288,9 +300,9 @@ func (d Deps) taskDiff(c *fiber.Ctx) error {
 }
 
 func (d Deps) taskDiffRaw(c *fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
 	if err != nil {
-		return httptransport.JSONError(c, 400, "bad_request", "invalid id")
+		return err
 	}
 	raw, err := d.UC.TaskDiffRaw(c.Context(), id)
 	if err != nil {
@@ -301,7 +313,10 @@ func (d Deps) taskDiffRaw(c *fiber.Ctx) error {
 }
 
 func (d Deps) patchTask(c *fiber.Ctx) error {
-	id, _ := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
 	var body struct {
 		Title             *string              `json:"title"`
 		Description       *string              `json:"description"`
@@ -321,7 +336,10 @@ func (d Deps) patchTask(c *fiber.Ctx) error {
 }
 
 func (d Deps) taskEvents(c *fiber.Ctx) error {
-	id, _ := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
 	ev, err := d.UC.Events(c.Context(), id)
 	if err != nil {
 		return httptransport.JSONError(c, 500, "internal", err.Error())
@@ -330,9 +348,9 @@ func (d Deps) taskEvents(c *fiber.Ctx) error {
 }
 
 func (d Deps) listRuns(c *fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
 	if err != nil {
-		return httptransport.JSONError(c, 400, "bad_request", "invalid id")
+		return err
 	}
 	runs, err := d.UC.ListRuns(c.Context(), id)
 	if err != nil {
@@ -345,9 +363,9 @@ func (d Deps) listRuns(c *fiber.Ctx) error {
 }
 
 func (d Deps) getRun(c *fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
 	if err != nil {
-		return httptransport.JSONError(c, 400, "bad_request", "invalid id")
+		return err
 	}
 	run, err := d.UC.GetRun(c.Context(), id)
 	if err != nil {
@@ -357,7 +375,10 @@ func (d Deps) getRun(c *fiber.Ctx) error {
 }
 
 func (d Deps) run(c *fiber.Ctx) error {
-	id, _ := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
 	t, err := d.UC.Run(c.Context(), id)
 	if err != nil {
 		return mapDomainErr(c, err)
@@ -366,11 +387,16 @@ func (d Deps) run(c *fiber.Ctx) error {
 }
 
 func (d Deps) approve(c *fiber.Ctx) error {
-	id, _ := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
 	var body struct {
 		Comment string `json:"comment"`
 	}
-	_ = c.BodyParser(&body)
+	if err := parseOptionalBody(c, &body); err != nil {
+		return err
+	}
 	t, err := d.UC.Approve(c.Context(), id, body.Comment)
 	if err != nil {
 		if errors.Is(err, task.ErrNotSucceeded) {
@@ -382,11 +408,16 @@ func (d Deps) approve(c *fiber.Ctx) error {
 }
 
 func (d Deps) retry(c *fiber.Ctx) error {
-	id, _ := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
 	var body struct {
 		Comment string `json:"comment"`
 	}
-	_ = c.BodyParser(&body)
+	if err := parseOptionalBody(c, &body); err != nil {
+		return err
+	}
 	t, err := d.UC.Retry(c.Context(), id, body.Comment)
 	if err != nil {
 		return mapDomainErr(c, err)
@@ -394,8 +425,11 @@ func (d Deps) retry(c *fiber.Ctx) error {
 	return c.JSON(t)
 }
 
-func (d Deps) ret(c *fiber.Ctx) error {
-	id, _ := uuid.Parse(c.Params("id"))
+func (d Deps) returnTo(c *fiber.Ctx) error {
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
 	var body struct {
 		ColumnID uuid.UUID `json:"column_id"`
 		Comment  string    `json:"comment"`
@@ -411,7 +445,10 @@ func (d Deps) ret(c *fiber.Ctx) error {
 }
 
 func (d Deps) archive(c *fiber.Ctx) error {
-	id, _ := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
 	t, err := d.UC.Archive(c.Context(), id)
 	if err != nil {
 		return mapDomainErr(c, err)
@@ -420,7 +457,10 @@ func (d Deps) archive(c *fiber.Ctx) error {
 }
 
 func (d Deps) unarchive(c *fiber.Ctx) error {
-	id, _ := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
 	t, err := d.UC.Unarchive(c.Context(), id)
 	if err != nil {
 		return mapDomainErr(c, err)
@@ -467,7 +507,10 @@ func (d Deps) createInt(c *fiber.Ctx) error {
 }
 
 func (d Deps) patchInt(c *fiber.Ctx) error {
-	id, _ := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
 	var body struct {
 		Type        string            `json:"type"`
 		Name        string            `json:"name"`
@@ -475,7 +518,9 @@ func (d Deps) patchInt(c *fiber.Ctx) error {
 		Credentials map[string]string `json:"credentials"`
 		Status      string            `json:"status"`
 	}
-	_ = c.BodyParser(&body)
+	if err := c.BodyParser(&body); err != nil {
+		return httptransport.JSONError(c, 400, "bad_request", err.Error())
+	}
 	item, err := d.UC.UpsertIntegration(c.Context(), &id, body.Type, body.Name, body.BaseURL, body.Credentials, body.Status)
 	if err != nil {
 		return httptransport.JSONError(c, 400, "bad_request", err.Error())
@@ -484,7 +529,10 @@ func (d Deps) patchInt(c *fiber.Ctx) error {
 }
 
 func (d Deps) deleteInt(c *fiber.Ctx) error {
-	id, _ := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
 	if err := d.UC.DeleteIntegration(c.Context(), id); err != nil {
 		return httptransport.JSONError(c, 400, "bad_request", err.Error())
 	}
@@ -492,7 +540,10 @@ func (d Deps) deleteInt(c *fiber.Ctx) error {
 }
 
 func (d Deps) testInt(c *fiber.Ctx) error {
-	id, _ := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
 	item, err := d.UC.TestIntegration(c.Context(), id)
 	if err != nil {
 		return httptransport.JSONError(c, 400, "bad_request", err.Error())
@@ -546,14 +597,19 @@ func (d Deps) createMCP(c *fiber.Ctx) error {
 }
 
 func (d Deps) patchMCP(c *fiber.Ctx) error {
-	id, _ := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
 	var body struct {
 		Name     string            `json:"name"`
 		Endpoint string            `json:"endpoint"`
 		Headers  map[string]string `json:"headers"`
 		Status   string            `json:"status"`
 	}
-	_ = c.BodyParser(&body)
+	if err := c.BodyParser(&body); err != nil {
+		return httptransport.JSONError(c, 400, "bad_request", err.Error())
+	}
 	item, err := d.UC.UpsertMCP(c.Context(), &id, body.Name, body.Endpoint, body.Headers, body.Status)
 	if err != nil {
 		return httptransport.JSONError(c, 400, "bad_request", err.Error())
@@ -562,7 +618,10 @@ func (d Deps) patchMCP(c *fiber.Ctx) error {
 }
 
 func (d Deps) deleteMCP(c *fiber.Ctx) error {
-	id, _ := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
 	if err := d.UC.DeleteMCP(c.Context(), id); err != nil {
 		return httptransport.JSONError(c, 400, "bad_request", err.Error())
 	}
@@ -570,7 +629,10 @@ func (d Deps) deleteMCP(c *fiber.Ctx) error {
 }
 
 func (d Deps) testMCP(c *fiber.Ctx) error {
-	id, _ := uuid.Parse(c.Params("id"))
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
 	item, err := d.UC.TestMCP(c.Context(), id)
 	if err != nil {
 		return httptransport.JSONError(c, 400, "bad_request", err.Error())
@@ -605,6 +667,24 @@ func (d Deps) sse(c *fiber.Ctx) error {
 			}
 		}
 	})
+	return nil
+}
+
+func parseID(c *fiber.Ctx) (uuid.UUID, error) {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return uuid.Nil, httptransport.JSONError(c, 400, "bad_request", "invalid id")
+	}
+	return id, nil
+}
+
+func parseOptionalBody(c *fiber.Ctx, out any) error {
+	if len(c.Body()) == 0 {
+		return nil
+	}
+	if err := c.BodyParser(out); err != nil {
+		return httptransport.JSONError(c, 400, "bad_request", err.Error())
+	}
 	return nil
 }
 

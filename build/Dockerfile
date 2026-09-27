@@ -1,4 +1,4 @@
-FROM golang:1.24-bookworm AS build
+FROM golang:1.27-bookworm AS build
 WORKDIR /src
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 COPY go.mod go.sum ./

@@ -70,7 +70,6 @@ func (s *Settings) BuildContextPackText(maxRunes int) (text, hash string) {
 	}
 	items := NormalizeContextPack(s.ContextPack)
 	var b strings.Builder
-	var titles []string
 	for _, it := range items {
 		if !it.Enabled {
 			continue
@@ -82,7 +81,6 @@ func (s *Settings) BuildContextPackText(maxRunes int) (text, hash string) {
 		b.WriteString(it.Title)
 		b.WriteString("\n")
 		b.WriteString(it.Body)
-		titles = append(titles, it.Title)
 	}
 	text = b.String()
 	if utf8.RuneCountInString(text) > maxRunes {
@@ -94,7 +92,6 @@ func (s *Settings) BuildContextPackText(maxRunes int) (text, hash string) {
 	}
 	sum := sha256.Sum256([]byte(text))
 	hash = hex.EncodeToString(sum[:8])
-	_ = titles
 	return text, hash
 }
 
@@ -121,7 +118,7 @@ func (s Settings) MaskedKey() string {
 	return "****" + v[len(v)-4:]
 }
 
-// EffectiveBudget merges settings <- column <- task overrides (task wins).
+// Budget is the effective limit after settings <- column <- task (tighten-only).
 type Budget struct {
 	MaxTokens    int
 	MaxCostUSD   float64
