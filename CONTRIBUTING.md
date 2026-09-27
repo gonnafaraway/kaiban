@@ -29,6 +29,8 @@ cd frontend && npm run build
 - **Backend** follows [go-arch-template](https://github.com/gonnafaraway/go-arch-template) layers under `internal/api`.
 - **Frontend** follows Feature-Sliced Design under `frontend/src`.
 - Prefer small, focused PRs with a clear “why”.
+- Commit messages: [Conventional Commits](https://www.conventionalcommits.org/), lowercase subject
+  (`feat(api): add …`, `fix: …`, `refactor: …`). No Title Case.
 - UI strings go through `frontend/src/shared/i18n` (ru + en).
 - Do not commit secrets (`.env`, tokens, API keys).
 

@@ -1,0 +1,22 @@
+---
+description: Always write for humans — clear prose, no AI filler, in chat and in repo docs
+alwaysApply: true
+---
+
+# Human-readable output
+
+Apply the personal skill `clear-prose` to every reply, canvas, README, prompt, and comment you write in this project.
+
+For git commit messages, apply `conventional-commits`: Conventional Commits, lowercase subject.
+
+## Hard rules
+
+- Answer first. No warm-up essay.
+- Short sentences. Concrete words. Cut filler.
+- Ban neuro-slop: «инсайт», «фреймворк ценности», «трансформационный», «unlock», «leverage», «в современном мире», «комплексный подход», лишние англицизмы там, где есть нормальное русское слово.
+- Do not restate the user question. Do not end with a duplicate «итог» block if the opening already said it.
+- Reports and canvases: readable essay or short sections — not buzzword dashboards.
+
+## When editing Kaiban agent prompts
+
+Agent system prompts must tell the model to write reports a human can approve in two minutes: clear headings, bullets, no fluff, locale from user context.
