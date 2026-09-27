@@ -24,8 +24,12 @@ func (d Deps) sse(c *fiber.Ctx) error {
 					return
 				}
 				var wrap map[string]any
-				_ = json.Unmarshal(msg, &wrap)
-				ev, _ := wrap["event"].(string)
+				ev := "message"
+				if err := json.Unmarshal(msg, &wrap); err == nil {
+					if s, ok := wrap["event"].(string); ok && s != "" {
+						ev = s
+					}
+				}
 				_, _ = w.WriteString("event: " + ev + "\n")
 				_, _ = w.WriteString("data: " + string(msg) + "\n\n")
 				_ = w.Flush()

@@ -4,7 +4,6 @@ import (
 	"os"
 
 	carloenv "github.com/caarlos0/env/v11"
-	"github.com/joho/godotenv"
 )
 
 type Env struct {
@@ -28,7 +27,6 @@ type Env struct {
 }
 
 func PrepareEnv() (*Env, error) {
-	_ = godotenv.Load()
 	// Preserve alternate names used by the previous custom getenv fallbacks.
 	prefer("OPENAI_API_BASE", "OPENAI_BASE_URL")
 	prefer("JIRA_TOKEN", "JIRA_API_TOKEN")

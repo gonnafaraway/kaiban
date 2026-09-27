@@ -2,13 +2,13 @@ package kanban
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/pkg/errors"
 
 	"kaiban/internal/api/domain/column"
 	domint "kaiban/internal/api/domain/integration"
@@ -75,19 +75,19 @@ type ImportResult struct {
 func (u *UseCase) ExportConfig(ctx context.Context) (*ConfigBundle, error) {
 	st, err := u.Repo.Settings.Get(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "get settings")
 	}
 	ints, err := u.Repo.Integrations.List(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "list integrations")
 	}
 	mcps, err := u.Repo.MCP.List(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "list mcp servers")
 	}
 	cols, err := u.Repo.Columns.List(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "list columns")
 	}
 
 	out := &ConfigBundle{
@@ -152,7 +152,7 @@ func (u *UseCase) ImportConfig(ctx context.Context, in *ConfigBundle) (*ImportRe
 	settingsUpdated := false
 	if in.Settings != nil {
 		if _, err := u.UpdateSettings(ctx, in.Settings); err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "import settings")
 		}
 		settingsUpdated = true
 	}
@@ -160,28 +160,28 @@ func (u *UseCase) ImportConfig(ctx context.Context, in *ConfigBundle) (*ImportRe
 	replacedInt := false
 	if in.Integrations != nil {
 		if err := u.replaceIntegrations(ctx, in.Integrations); err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "replace integrations")
 		}
 		replacedInt = true
 	}
 	replacedMCP := false
 	if in.MCPServers != nil {
 		if err := u.replaceMCP(ctx, in.MCPServers); err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "replace mcp")
 		}
 		replacedMCP = true
 	}
 	replacedCols := false
 	if in.Columns != nil {
 		if err := u.replaceColumns(ctx, in.Columns); err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "replace columns")
 		}
 		replacedCols = true
 	}
 
 	bundle, err := u.ExportConfig(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "config bundle")
 	}
 	return &ImportResult{
 		Mode:                 "replace_all",
@@ -199,17 +199,17 @@ func (u *UseCase) ImportConfig(ctx context.Context, in *ConfigBundle) (*ImportRe
 func (u *UseCase) replaceIntegrations(ctx context.Context, items []ExportedIntegration) error {
 	existing, err := u.Repo.Integrations.List(ctx)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "list integrations")
 	}
 	for _, e := range existing {
 		if err := u.Repo.Integrations.Delete(ctx, e.ID); err != nil {
-			return err
+			return errors.Wrap(err, "delete")
 		}
 	}
 	now := time.Now().UTC()
 	for _, item := range items {
-		typ := strings.TrimSpace(item.Type)
-		name := strings.TrimSpace(item.Name)
+		typ := item.Type
+		name := item.Name
 		if typ == "" || name == "" {
 			return errors.New("integration requires type and name")
 		}
@@ -223,10 +223,10 @@ func (u *UseCase) replaceIntegrations(ctx context.Context, items []ExportedInteg
 		}
 		cred := scrubSecretMap(item.Credentials)
 		if err := u.Repo.Integrations.Create(ctx, &domint.Integration{
-			ID: id, Type: domint.Type(typ), Name: name, BaseURL: strings.TrimSpace(item.BaseURL),
+			ID: id, Type: domint.Type(typ), Name: name, BaseURL: item.BaseURL,
 			Credentials: cred, Status: status, CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
-			return err
+			return errors.Wrap(err, "create integration")
 		}
 	}
 	return nil
@@ -235,17 +235,17 @@ func (u *UseCase) replaceIntegrations(ctx context.Context, items []ExportedInteg
 func (u *UseCase) replaceMCP(ctx context.Context, items []ExportedMCPServer) error {
 	existing, err := u.Repo.MCP.List(ctx)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "list mcp servers")
 	}
 	for _, e := range existing {
 		if err := u.Repo.MCP.Delete(ctx, e.ID); err != nil {
-			return err
+			return errors.Wrap(err, "delete mcp server")
 		}
 	}
 	now := time.Now().UTC()
 	for _, item := range items {
-		name := strings.TrimSpace(item.Name)
-		endpoint := strings.TrimSpace(item.Endpoint)
+		name := item.Name
+		endpoint := item.Endpoint
 		if name == "" || endpoint == "" {
 			return errors.New("mcp server requires name and endpoint")
 		}
@@ -259,7 +259,7 @@ func (u *UseCase) replaceMCP(ctx context.Context, items []ExportedMCPServer) err
 		} else {
 			parsed, err := parseMCPStatus(string(status))
 			if err != nil {
-				return err
+				return errors.Wrap(err, "parse mcp status")
 			}
 			status = parsed
 		}
@@ -272,7 +272,7 @@ func (u *UseCase) replaceMCP(ctx context.Context, items []ExportedMCPServer) err
 			ID: id, Name: name, Endpoint: endpoint, Headers: headers, Capabilities: caps,
 			Status: status, CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
-			return err
+			return errors.Wrap(err, "create mcp server")
 		}
 	}
 	return nil
@@ -281,17 +281,17 @@ func (u *UseCase) replaceMCP(ctx context.Context, items []ExportedMCPServer) err
 func (u *UseCase) replaceColumns(ctx context.Context, items []ExportedColumn) error {
 	existing, err := u.Repo.Columns.List(ctx)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "list columns")
 	}
 	keep := make(map[uuid.UUID]struct{}, len(items))
 	now := time.Now().UTC()
 
 	for i, item := range items {
-		name := strings.TrimSpace(item.Name)
+		name := item.Name
 		if name == "" {
-			if en := strings.TrimSpace(item.NameI18n["en"]); en != "" {
+			if en := item.NameI18n["en"]; en != "" {
 				name = en
-			} else if ru := strings.TrimSpace(item.NameI18n["ru"]); ru != "" {
+			} else if ru := item.NameI18n["ru"]; ru != "" {
 				name = ru
 			}
 		}
@@ -311,10 +311,10 @@ func (u *UseCase) replaceColumns(ctx context.Context, items []ExportedColumn) er
 		if nameI18n == nil {
 			nameI18n = map[string]string{}
 		}
-		if _, ok := nameI18n["en"]; !ok || strings.TrimSpace(nameI18n["en"]) == "" {
+		if nameI18n["en"] == "" {
 			nameI18n["en"] = name
 		}
-		if _, ok := nameI18n["ru"]; !ok || strings.TrimSpace(nameI18n["ru"]) == "" {
+		if nameI18n["ru"] == "" {
 			nameI18n["ru"] = name
 		}
 		fields := column.NormalizeOutputFields(item.OutputFields)
@@ -340,7 +340,7 @@ func (u *UseCase) replaceColumns(ctx context.Context, items []ExportedColumn) er
 				CreatedAt: now, UpdatedAt: now,
 			}
 			if err := u.Repo.Columns.Create(ctx, c); err != nil {
-				return err
+				return errors.Wrap(err, "create")
 			}
 			continue
 		}
@@ -355,7 +355,7 @@ func (u *UseCase) replaceColumns(ctx context.Context, items []ExportedColumn) er
 		cur.OrderIndex = order
 		cur.UpdatedAt = now
 		if err := u.Repo.Columns.Update(ctx, cur); err != nil {
-			return err
+			return errors.Wrap(err, "update")
 		}
 	}
 
@@ -365,7 +365,7 @@ func (u *UseCase) replaceColumns(ctx context.Context, items []ExportedColumn) er
 		}
 		n, err := u.Repo.Columns.CountTasks(ctx, cur.ID)
 		if err != nil {
-			return err
+			return errors.Wrap(err, "count tasks")
 		}
 		if n > 0 {
 			return fmt.Errorf("cannot remove column %q (%s): it still has tasks", cur.Name, cur.ID)

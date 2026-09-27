@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 type Tool interface {
@@ -21,6 +23,36 @@ type Tool interface {
 	Description() string
 	Parameters() map[string]any
 	Call(ctx context.Context, args string) (string, error)
+}
+
+type gitToolArgs struct {
+	Command string `json:"command"`
+	Message string `json:"message"`
+}
+
+type confluenceWriteArgs struct {
+	ID      string `json:"id"`
+	Body    string `json:"body"`
+	Heading string `json:"heading"`
+}
+
+type mcpToolDescriptor struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"inputSchema"`
+}
+
+type mcpToolsListResult struct {
+	Tools []mcpToolDescriptor `json:"tools"`
+}
+
+type mcpRPCError struct {
+	Message string `json:"message"`
+}
+
+type mcpToolsListResponse struct {
+	Result mcpToolsListResult `json:"result"`
+	Error  *mcpRPCError       `json:"error"`
 }
 
 type HTTPTool struct {
@@ -34,7 +66,12 @@ func (t HTTPTool) Description() string        { return t.desc }
 func (t HTTPTool) Parameters() map[string]any { return t.params }
 func (t HTTPTool) Call(ctx context.Context, args string) (string, error) {
 	var payload map[string]any
-	_ = json.Unmarshal([]byte(args), &payload)
+	if args == "" {
+		args = "{}"
+	}
+	if err := json.Unmarshal([]byte(args), &payload); err != nil {
+		return "", errors.Wrap(err, "decode http tool args")
+	}
 	u := t.url
 	bodyPayload := map[string]any{}
 	for k, v := range payload {
@@ -57,12 +94,15 @@ func (t HTTPTool) Call(ctx context.Context, args string) (string, error) {
 			u += "?" + q.Encode()
 		}
 	} else if t.method != http.MethodGet && len(bodyPayload) > 0 {
-		b, _ := json.Marshal(bodyPayload)
+		b, err := marshalJSON(bodyPayload, "http tool body")
+		if err != nil {
+			return "", err
+		}
 		body = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, t.method, u, body)
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(err, "build http tool request")
 	}
 	for k, v := range t.headers {
 		req.Header.Set(k, v)
@@ -73,7 +113,7 @@ func (t HTTPTool) Call(ctx context.Context, args string) (string, error) {
 	client := &http.Client{Timeout: 45 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(err, "http tool request")
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 32*1024))
@@ -106,11 +146,13 @@ func (g GitTool) Call(ctx context.Context, args string) (string, error) {
 	if g.RepoURL == "" {
 		return "git repo is not configured", nil
 	}
-	var p struct {
-		Command string `json:"command"`
-		Message string `json:"message"`
+	var p gitToolArgs
+	if args == "" {
+		args = "{}"
 	}
-	_ = json.Unmarshal([]byte(args), &p)
+	if err := json.Unmarshal([]byte(args), &p); err != nil {
+		return "", errors.Wrap(err, "decode git tool args")
+	}
 	if p.Command == "" {
 		p.Command = "status"
 	}
@@ -121,7 +163,7 @@ func (g GitTool) Call(ctx context.Context, args string) (string, error) {
 	repo := AuthenticatedGitURLAs(g.RepoURL, g.Token, user)
 	dir := filepath.Join(g.WorkDir, g.Branch)
 	if err := ensureRepo(ctx, repo, dir, g.Branch); err != nil {
-		return "", err
+		return "", errors.Wrap(err, "ensure git repo")
 	}
 	switch p.Command {
 	case "commit":
@@ -188,7 +230,7 @@ func RefreshTaskWorktree(ctx context.Context, workDir, repoURL, branch, base str
 	}
 	dir := filepath.Join(workDir, branch)
 	if err := ensureRepo(ctx, repoURL, dir, branch); err != nil {
-		return err
+		return errors.Wrap(err, "ensure git repo")
 	}
 	if base != "" && base != branch {
 		// Force-update local base tip even if history was rewritten.
@@ -252,7 +294,7 @@ func safeGitAdd(ctx context.Context, dir string) error {
 
 func JiraTools(base, email, token string) []Tool {
 	h := AtlassianAuth(email, token)
-	base = strings.TrimRight(base, "/")
+	base = apiBase(base)
 	return []Tool{
 		HTTPTool{"jira_search", "Search Jira issues with JQL", http.MethodGet, base + "/rest/api/2/search", h, map[string]any{"type": "object", "properties": map[string]any{"jql": map[string]any{"type": "string"}, "maxResults": map[string]any{"type": "integer"}}}},
 		HTTPTool{"jira_get_issue", "Get Jira issue by key", http.MethodGet, base + "/rest/api/2/issue/{issueKey}", h, map[string]any{"type": "object", "properties": map[string]any{"issueKey": map[string]any{"type": "string"}}, "required": []string{"issueKey"}}},
@@ -263,7 +305,7 @@ func JiraTools(base, email, token string) []Tool {
 
 func ConfluenceTools(base, email, token string) []Tool {
 	h := AtlassianAuth(email, token)
-	base = strings.TrimRight(base, "/")
+	base = apiBase(base)
 	return []Tool{
 		HTTPTool{"confluence_search", "Search Confluence CQL", http.MethodGet, base + "/rest/api/content/search", h, map[string]any{"type": "object", "properties": map[string]any{"cql": map[string]any{"type": "string"}}}},
 		HTTPTool{"confluence_get_page", "Get Confluence page by id. Expand body.", http.MethodGet, base + "/rest/api/content/{id}?expand=body.storage,version", h, map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string"}}, "required": []string{"id"}}},
@@ -303,12 +345,10 @@ func (t confluenceWriteTool) Parameters() map[string]any {
 }
 
 func (t confluenceWriteTool) Call(ctx context.Context, args string) (string, error) {
-	var p struct {
-		ID      string `json:"id"`
-		Body    string `json:"body"`
-		Heading string `json:"heading"`
+	var p confluenceWriteArgs
+	if err := json.Unmarshal([]byte(args), &p); err != nil {
+		return "", errors.Wrap(err, "decode confluence tool args")
 	}
-	_ = json.Unmarshal([]byte(args), &p)
 	if t.kind == "comment" {
 		htmlBody := "<pre>" + html.EscapeString(p.Body) + "</pre>"
 		return PostConfluenceComment(ctx, t.base, t.email, t.token, p.ID, htmlBody)
@@ -321,7 +361,7 @@ func (t confluenceWriteTool) Call(ctx context.Context, args string) (string, err
 
 func GitLabTools(base, token string) []Tool {
 	h := GitLabAuth(token)
-	base = strings.TrimRight(base, "/")
+	base = apiBase(base)
 	return []Tool{
 		HTTPTool{"gitlab_get_project", "Get GitLab project by URL-encoded path id.", http.MethodGet, base + "/api/v4/projects/{id}", h, map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string"}}, "required": []string{"id"}}},
 		HTTPTool{"gitlab_list_mrs", "List merge requests of a project.", http.MethodGet, base + "/api/v4/projects/{id}/merge_requests", h, map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string"}}, "required": []string{"id"}}},
@@ -390,18 +430,7 @@ func HandshakeMCP(ctx context.Context, endpoint string, headers map[string]strin
 	if err != nil {
 		return nil, nil, err
 	}
-	var parsed struct {
-		Result struct {
-			Tools []struct {
-				Name        string         `json:"name"`
-				Description string         `json:"description"`
-				InputSchema map[string]any `json:"inputSchema"`
-			} `json:"tools"`
-		} `json:"result"`
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
+	var parsed mcpToolsListResponse
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return map[string]any{"raw": string(raw)}, nil, nil
 	}
@@ -432,23 +461,31 @@ func (m mcpTool) Description() string        { return m.desc }
 func (m mcpTool) Parameters() map[string]any { return m.schema }
 func (m mcpTool) Call(ctx context.Context, args string) (string, error) {
 	var arg any
-	_ = json.Unmarshal([]byte(args), &arg)
+	if args == "" {
+		args = "{}"
+	}
+	if err := json.Unmarshal([]byte(args), &arg); err != nil {
+		return "", errors.Wrap(err, "decode mcp tool args")
+	}
 	body := map[string]any{
 		"jsonrpc": "2.0", "id": 3, "method": "tools/call",
 		"params": map[string]any{"name": m.name, "arguments": arg},
 	}
 	raw, err := mcpPost(ctx, m.client, m.endpoint, m.headers, body)
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(err, "mcp tool call")
 	}
 	return string(raw), nil
 }
 
 func mcpPost(ctx context.Context, client *http.Client, endpoint string, headers map[string]string, body any) ([]byte, error) {
-	b, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(b))
+	b, err := marshalJSON(body, "mcp request")
 	if err != nil {
 		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(b))
+	if err != nil {
+		return nil, errors.Wrap(err, "build mcp request")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
@@ -457,7 +494,7 @@ func mcpPost(ctx context.Context, client *http.Client, endpoint string, headers 
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "mcp http request")
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))

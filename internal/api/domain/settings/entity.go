@@ -21,6 +21,7 @@ type ContextPackItem struct {
 
 type Settings struct {
 	ID               uuid.UUID `json:"id"`
+	LLMProvider      string    `json:"llm_provider"`
 	LLMBaseURL       string    `json:"llm_base_url"`
 	LLMAPIKey        string    `json:"llm_api_key"`
 	LLMModel         string    `json:"llm_model"`

@@ -28,6 +28,11 @@ type DiffSummary struct {
 	Empty      bool       `json:"empty"`
 }
 
+type remoteURLPayload struct {
+	HTMLURL string `json:"html_url"`
+	WebURL  string `json:"web_url"`
+}
+
 // TaskDiffSummary runs git diff --numstat and log against base..branch in the task worktree.
 func TaskDiffSummary(ctx context.Context, workDir, branch, base string) (*DiffSummary, error) {
 	if branch == "" {
@@ -110,10 +115,7 @@ func TaskDiffUnified(ctx context.Context, workDir, branch, base string, maxBytes
 // ExtractRemoteURL pulls html_url (GitHub) or web_url (GitLab) from Ensure* response bodies.
 func ExtractRemoteURL(raw string) string {
 	body := stripStatus(raw)
-	var p struct {
-		HTMLURL string `json:"html_url"`
-		WebURL  string `json:"web_url"`
-	}
+	var p remoteURLPayload
 	if err := json.Unmarshal([]byte(body), &p); err != nil {
 		return ""
 	}

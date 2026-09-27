@@ -12,6 +12,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 type ChatMessage struct {
@@ -21,22 +23,26 @@ type ChatMessage struct {
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 }
 
+type ToolCallFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
 type ToolCall struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-	} `json:"function"`
+	ID       string           `json:"id"`
+	Type     string           `json:"type"`
+	Function ToolCallFunction `json:"function"`
+}
+
+type ToolSpecFunction struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
 }
 
 type ToolSpec struct {
-	Type     string `json:"type"`
-	Function struct {
-		Name        string         `json:"name"`
-		Description string         `json:"description"`
-		Parameters  map[string]any `json:"parameters"`
-	} `json:"function"`
+	Type     string           `json:"type"`
+	Function ToolSpecFunction `json:"function"`
 }
 
 type LLM interface {
@@ -47,9 +53,22 @@ type OpenAIClient struct {
 	HTTP *http.Client
 }
 
+type llmAPIError struct {
+	Message string `json:"message"`
+}
+
+type chatJSONChoice struct {
+	Message ChatMessage `json:"message"`
+}
+
+type chatJSONResponse struct {
+	Choices []chatJSONChoice `json:"choices"`
+	Error   llmAPIError      `json:"error"`
+}
+
 func NewOpenAI() *OpenAIClient {
 	timeout := 10 * time.Minute
-	if s := strings.TrimSpace(os.Getenv("LLM_HTTP_TIMEOUT")); s != "" {
+	if s := os.Getenv("LLM_HTTP_TIMEOUT"); s != "" {
 		if d, err := time.ParseDuration(s); err == nil && d > 0 {
 			timeout = d
 		}
@@ -71,7 +90,7 @@ func NewOpenAI() *OpenAIClient {
 }
 
 func (c *OpenAIClient) Chat(ctx context.Context, baseURL, apiKey, model string, messages []ChatMessage, tools []ToolSpec) (ChatMessage, error) {
-	baseURL = strings.TrimRight(baseURL, "/")
+	baseURL = apiBase(baseURL)
 	body := map[string]any{
 		"model":    model,
 		"messages": messages,
@@ -83,11 +102,11 @@ func (c *OpenAIClient) Chat(ctx context.Context, baseURL, apiKey, model string, 
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
-		return ChatMessage{}, err
+		return ChatMessage{}, errors.Wrap(err, "marshal llm request")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(raw))
 	if err != nil {
-		return ChatMessage{}, err
+		return ChatMessage{}, errors.Wrap(err, "build llm request")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
@@ -96,7 +115,7 @@ func (c *OpenAIClient) Chat(ctx context.Context, baseURL, apiKey, model string, 
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return ChatMessage{}, err
+		return ChatMessage{}, errors.Wrap(err, "llm http request")
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
@@ -107,23 +126,24 @@ func (c *OpenAIClient) Chat(ctx context.Context, baseURL, apiKey, model string, 
 	head, _ := br.Peek(8)
 	ct := resp.Header.Get("Content-Type")
 	if strings.Contains(ct, "text/event-stream") || bytes.HasPrefix(bytes.TrimSpace(head), []byte("data:")) {
-		return parseChatStream(br)
+		msg, err := parseChatStream(br)
+		if err != nil {
+			return ChatMessage{}, errors.Wrap(err, "parse llm stream")
+		}
+		return msg, nil
 	}
 	data, _ := io.ReadAll(br)
-	return parseChatJSON(data)
+	msg, err := parseChatJSON(data)
+	if err != nil {
+		return ChatMessage{}, errors.Wrap(err, "parse llm json")
+	}
+	return msg, nil
 }
 
 func parseChatJSON(data []byte) (ChatMessage, error) {
-	var parsed struct {
-		Choices []struct {
-			Message ChatMessage `json:"message"`
-		} `json:"choices"`
-		Error struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
+	var parsed chatJSONResponse
 	if err := json.Unmarshal(data, &parsed); err != nil {
-		return ChatMessage{}, err
+		return ChatMessage{}, errors.Wrap(err, "decode llm json")
 	}
 	if parsed.Error.Message != "" {
 		return ChatMessage{}, fmt.Errorf("llm: %s", parsed.Error.Message)
@@ -134,26 +154,27 @@ func parseChatJSON(data []byte) (ChatMessage, error) {
 	return parsed.Choices[0].Message, nil
 }
 
+type streamToolCallDelta struct {
+	Index    int              `json:"index"`
+	ID       string           `json:"id"`
+	Type     string           `json:"type"`
+	Function ToolCallFunction `json:"function"`
+}
+
+type streamDelta struct {
+	Content   string                `json:"content"`
+	Role      string                `json:"role"`
+	ToolCalls []streamToolCallDelta `json:"tool_calls"`
+}
+
+type streamChoice struct {
+	Delta        streamDelta `json:"delta"`
+	FinishReason string      `json:"finish_reason"`
+}
+
 type streamChunk struct {
-	Choices []struct {
-		Delta struct {
-			Content   string `json:"content"`
-			Role      string `json:"role"`
-			ToolCalls []struct {
-				Index    int    `json:"index"`
-				ID       string `json:"id"`
-				Type     string `json:"type"`
-				Function struct {
-					Name      string `json:"name"`
-					Arguments string `json:"arguments"`
-				} `json:"function"`
-			} `json:"tool_calls"`
-		} `json:"delta"`
-		FinishReason string `json:"finish_reason"`
-	} `json:"choices"`
-	Error struct {
-		Message string `json:"message"`
-	} `json:"error"`
+	Choices []streamChoice `json:"choices"`
+	Error   llmAPIError    `json:"error"`
 }
 
 func parseChatStream(r io.Reader) (ChatMessage, error) {
@@ -215,7 +236,7 @@ func parseChatStream(r io.Reader) (ChatMessage, error) {
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return ChatMessage{}, err
+		return ChatMessage{}, errors.Wrap(err, "read llm stream")
 	}
 	if !sawData {
 		return ChatMessage{}, fmt.Errorf("llm: empty stream")

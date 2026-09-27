@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/pkg/errors"
 	"html"
 	"strings"
 
@@ -22,32 +23,32 @@ import (
 func (u *UseCase) ExecuteAgentJob(ctx context.Context, j *job.Job) error {
 	t, err := u.Repo.Tasks.Get(ctx, j.TaskID)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "get task")
 	}
 	if t.IsArchived() {
 		return task.ErrArchived
 	}
 	if err := t.MarkRunning(); err != nil {
-		return err
+		return errors.Wrap(err, "mark running")
 	}
 	_ = u.Repo.Tasks.Update(ctx, t)
 	u.publish("task.updated", t)
 
 	col, err := u.Repo.Columns.Get(ctx, t.ColumnID)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "get column")
 	}
 	u.agentLog(t.ID, "status", fmt.Sprintf("Колонка «%s»: агент запущен", col.Name), nil)
 
 	st, err := u.Repo.Settings.Get(ctx)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "get settings")
 	}
 	systemPrompt := col.BuildSystemPrompt()
 	packText, packHash := st.BuildContextPackText(12000)
 	ar, err := u.startRun(ctx, t, col, st, systemPrompt, packHash)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "start run")
 	}
 	if packText != "" {
 		systemPrompt = systemPrompt + "\n\n# Context pack\n" + packText
@@ -56,22 +57,17 @@ func (u *UseCase) ExecuteAgentJob(ctx context.Context, j *job.Job) error {
 		ar.run.ID.String()[:8], ar.budget.MaxLLMSteps, ar.budget.MaxToolCalls, ar.budget.MaxTokens, ar.budget.MaxCostUSD, ar.budget.MaxWallSec),
 		map[string]any{"run_id": ar.run.ID.String()})
 
-	reports, _ := u.Repo.Tasks.ListReports(ctx, t.ID)
+	reports, err := u.Repo.Tasks.ListReports(ctx, t.ID)
+	if err != nil {
+		return errors.Wrap(err, "list reports")
+	}
 	tools := u.collectTools(ctx, st, t)
 	if len(col.OutputFields) > 0 {
-		fields := make([]struct {
-			Key      string `json:"key"`
-			Label    string `json:"label"`
-			Required bool   `json:"required"`
-			Type     string `json:"type"`
-		}, 0, len(col.OutputFields))
+		fields := make([]integration.StageOutputField, 0, len(col.OutputFields))
 		for _, f := range col.OutputFields {
-			fields = append(fields, struct {
-				Key      string `json:"key"`
-				Label    string `json:"label"`
-				Required bool   `json:"required"`
-				Type     string `json:"type"`
-			}{Key: f.Key, Label: f.Label, Required: f.Required, Type: string(f.Type)})
+			fields = append(fields, integration.StageOutputField{
+				Key: f.Key, Label: f.Label, Required: f.Required, Type: string(f.Type),
+			})
 		}
 		tools = append(tools, integration.StageOutputTool{
 			Fields: fields,
@@ -87,14 +83,14 @@ func (u *UseCase) ExecuteAgentJob(ctx context.Context, j *job.Job) error {
 				if err := column.ValidateOutputs(col.OutputFields, merged); err != nil {
 					// allow partial submit of optional/required mix: only reject type errors for provided keys
 					for _, f := range col.OutputFields {
-						v := strings.TrimSpace(merged[f.Key])
+						v := merged[f.Key]
 						if v == "" {
 							continue
 						}
 						tmp := map[string]string{f.Key: v}
 						one := []column.OutputField{{Key: f.Key, Label: f.Label, Required: false, Type: f.Type}}
 						if err := column.ValidateOutputs(one, tmp); err != nil {
-							return err
+							return errors.Wrap(err, "validate outputs")
 						}
 					}
 				}
@@ -144,6 +140,10 @@ func (u *UseCase) ExecuteAgentJob(ctx context.Context, j *job.Job) error {
 		contractHint = strings.Join(parts, ", ") + " — use submit_stage_output before finishing"
 	}
 
+	prevReports, err := formatReports(reports)
+	if err != nil {
+		return errors.Wrap(err, "format reports")
+	}
 	userMsg := fmt.Sprintf(`Locale: %s
 Title: %s
 Description:
@@ -168,7 +168,7 @@ If a field is empty, skip that system. After analysis, still write a markdown re
 Previous reports:
 %s`,
 		st.Locale, t.Title, t.Description, t.Variables, t.ContextData.ExtraInstructions, t.ContextData.RetryNotes, t.GitBranch,
-		dash(arts.JiraIssue), dash(arts.ConfluenceURL), dash(arts.GitLabRepo), dash(arts.GitHubRepo), contractHint, dash(reqText), formatReports(reports))
+		dash(arts.JiraIssue), dash(arts.ConfluenceURL), dash(arts.GitLabRepo), dash(arts.GitHubRepo), contractHint, dash(reqText), prevReports)
 
 	messages := []integration.ChatMessage{
 		{Role: "system", Content: systemPrompt},
@@ -210,7 +210,7 @@ Previous reports:
 			_ = u.audit(ctx, &t.ID, auditevent.ActorAgent, "agent", "agent.failed", map[string]any{"error": err.Error(), "run_id": ar.run.ID.String()})
 			u.publish("task.updated", t)
 			u.runLog(ctx, ar, t.ID, "error", "Ошибка LLM: "+err.Error(), nil)
-			return err
+			return errors.Wrap(err, "llm chat")
 		}
 		outEst := settings.EstimateTokens(msg.Content)
 		for _, tc := range msg.ToolCalls {
@@ -220,7 +220,7 @@ Previous reports:
 		_ = u.Repo.AgentRuns.Update(ctx, ar.run)
 
 		if len(msg.ToolCalls) == 0 {
-			report = strings.TrimSpace(msg.Content)
+			report = msg.Content
 			u.runLog(ctx, ar, t.ID, "llm", "Модель вернула финальный отчёт", nil)
 			break
 		}
@@ -410,7 +410,7 @@ Previous reports:
 			"reason": stopReason,
 		})
 		if err := t.MarkFailed(report); err != nil {
-			return err
+			return errors.Wrap(err, "mark failed")
 		}
 		_ = u.Repo.Tasks.AddReport(ctx, t.ID, t.ColumnID, report)
 		_ = u.Repo.Tasks.Update(ctx, t)
@@ -427,7 +427,7 @@ Previous reports:
 	})
 
 	if err := t.MarkSucceeded(report); err != nil {
-		return err
+		return errors.Wrap(err, "mark succeeded")
 	}
 	_ = u.Repo.Tasks.AddReport(ctx, t.ID, t.ColumnID, report)
 	_ = u.Repo.Tasks.Update(ctx, t)
@@ -541,16 +541,18 @@ func toSpecs(tools []integration.Tool) []integration.ToolSpec {
 	return out
 }
 
-func formatReports(rs []repository.Report) string {
+func formatReports(rs []repository.Report) (string, error) {
 	if len(rs) == 0 {
-		return "(none)"
+		return "(none)", nil
 	}
-	b, _ := json.Marshal(rs)
-	return string(b)
+	b, err := json.Marshal(rs)
+	if err != nil {
+		return "", errors.Wrap(err, "marshal reports")
+	}
+	return string(b), nil
 }
 
 func dash(s string) string {
-	s = strings.TrimSpace(s)
 	if s == "" {
 		return "(not set)"
 	}

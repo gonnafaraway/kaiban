@@ -1,0 +1,48 @@
+---
+description: Nested JSON/API structs must be named types, never anonymous inline structs
+alwaysApply: true
+---
+
+# Named nested structs
+
+Never declare anonymous nested `struct { ... }` fields (or slice element types). Each shape is a separate named type; parents reference those types by name.
+
+## Bad
+
+```go
+type confluencePageDoc struct {
+	ID    string `json:"id"`
+	Space struct {
+		Key string `json:"key"`
+	} `json:"space"`
+	Body struct {
+		Storage struct {
+			Value string `json:"value"`
+		} `json:"storage"`
+	} `json:"body"`
+}
+```
+
+## Good
+
+```go
+type confluenceSpaceRef struct {
+	Key string `json:"key"`
+}
+
+type confluenceStorageBody struct {
+	Value string `json:"value"`
+}
+
+type confluencePageBody struct {
+	Storage confluenceStorageBody `json:"storage"`
+}
+
+type confluencePageDoc struct {
+	ID    string               `json:"id"`
+	Space confluenceSpaceRef   `json:"space"`
+	Body  confluencePageBody   `json:"body"`
+}
+```
+
+Same rule for `[]struct { ... }` — extract an element type (`type chatJSONChoice struct { ... }`, then `Choices []chatJSONChoice`).

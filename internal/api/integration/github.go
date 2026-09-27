@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/pkg/errors"
 )
 
 // GitHubClient is a thin REST client for GitHub / GitHub Enterprise API v3.
@@ -15,14 +17,18 @@ type GitHubClient struct {
 	Token   string
 }
 
+type githubRepoMeta struct {
+	DefaultBranch string `json:"default_branch"`
+}
+
 func NewGitHubClient(baseURL, token string) *GitHubClient {
-	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	base := apiBase(baseURL)
 	if base == "" {
 		base = "https://api.github.com"
 	}
 	// Enterprise often configured as https://github.example.com — normalize to /api/v3.
 	if !strings.Contains(base, "api.github.com") && !strings.HasSuffix(base, "/api/v3") {
-		if strings.Contains(strings.ToLower(base), "github") && !strings.Contains(base, "/api/") {
+		if strings.Contains(base, "github") && !strings.Contains(base, "/api/") {
 			base = base + "/api/v3"
 		}
 	}
@@ -48,11 +54,8 @@ func (c *GitHubClient) DefaultBranch(ctx context.Context, owner, repo string) st
 	if err != nil {
 		return "main"
 	}
-	var p struct {
-		DefaultBranch string `json:"default_branch"`
-	}
-	_ = json.Unmarshal([]byte(stripStatus(raw)), &p)
-	if p.DefaultBranch == "" {
+	var p githubRepoMeta
+	if err := json.Unmarshal([]byte(stripStatus(raw)), &p); err != nil || p.DefaultBranch == "" {
 		return "main"
 	}
 	return p.DefaultBranch
@@ -72,12 +75,15 @@ func (c *GitHubClient) CreatePull(ctx context.Context, owner, repo, title, head,
 	if base == "" {
 		base = c.DefaultBranch(ctx, owner, repo)
 	}
-	payload, _ := json.Marshal(map[string]any{
+	payload, err := marshalJSON(map[string]any{
 		"title": title,
 		"head":  head,
 		"base":  base,
 		"body":  body,
-	})
+	}, "github pull")
+	if err != nil {
+		return "", err
+	}
 	return doJSON(ctx, http.MethodPost, c.repoURL(owner, repo)+"/pulls", c.headers(), payload)
 }
 
@@ -85,7 +91,7 @@ func (c *GitHubClient) CreatePull(ctx context.Context, owner, repo, title, head,
 func (c *GitHubClient) EnsurePR(ctx context.Context, projectRef, source, target, title, description string) (string, error) {
 	path, err := ParseGitHubRepo(projectRef)
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(err, "parse github repo")
 	}
 	parts := strings.SplitN(path, "/", 2)
 	if len(parts) != 2 {

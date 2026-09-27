@@ -3,10 +3,10 @@ package kanban
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pkg/errors"
 
 	"kaiban/internal/api/domain/auditevent"
 	domint "kaiban/internal/api/domain/integration"
@@ -17,7 +17,7 @@ func (u *UseCase) audit(ctx context.Context, taskID *uuid.UUID, actor auditevent
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	return u.Repo.Audit.Add(ctx, &auditevent.Event{TaskID: taskID, ActorType: actor, ActorID: actorID, Action: action, Payload: payload})
+	return errors.Wrap(u.Repo.Audit.Add(ctx, &auditevent.Event{TaskID: taskID, ActorType: actor, ActorID: actorID, Action: action, Payload: payload}), "audit")
 }
 
 func (u *UseCase) publish(ev string, payload any) {
@@ -73,7 +73,7 @@ func integrationCreds(i *domint.Integration) (email, token string) {
 }
 
 func parseMCPStatus(s string) (mcpserver.Status, error) {
-	st := mcpserver.Status(strings.TrimSpace(s))
+	st := mcpserver.Status(s)
 	switch st {
 	case mcpserver.StatusDisabled, mcpserver.StatusEnabled, mcpserver.StatusError:
 		return st, nil

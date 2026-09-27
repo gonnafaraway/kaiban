@@ -2,20 +2,28 @@ package kanban
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pkg/errors"
 
 	"kaiban/internal/api/domain/column"
 )
 
 func (u *UseCase) ListColumns(ctx context.Context) ([]*column.Column, error) {
-	return u.Repo.Columns.List(ctx)
+	cols, err := u.Repo.Columns.List(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "list columns")
+	}
+	return cols, nil
 }
 
 func (u *UseCase) CreateColumn(ctx context.Context, name, prompt string, order int) (*column.Column, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, column.ErrNameRequired
+	}
 	now := time.Now().UTC()
 	c := &column.Column{
 		ID: uuid.New(), Name: name,
@@ -24,7 +32,7 @@ func (u *UseCase) CreateColumn(ctx context.Context, name, prompt string, order i
 		OrderIndex: order, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := u.Repo.Columns.Create(ctx, c); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "create column")
 	}
 	return c, nil
 }
@@ -32,7 +40,7 @@ func (u *UseCase) CreateColumn(ctx context.Context, name, prompt string, order i
 func (u *UseCase) PatchColumn(ctx context.Context, id uuid.UUID, name, template, overlay *string, nameI18n map[string]string, fields *[]column.OutputField, budget *column.BudgetLimits, requiresGitDiff *bool) (*column.Column, error) {
 	c, err := u.Repo.Columns.Get(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "get column")
 	}
 	if name != nil {
 		c.Name = *name
@@ -42,13 +50,13 @@ func (u *UseCase) PatchColumn(ctx context.Context, id uuid.UUID, name, template,
 			c.NameI18n = map[string]string{}
 		}
 		for k, v := range nameI18n {
-			if strings.TrimSpace(v) != "" {
-				c.NameI18n[k] = strings.TrimSpace(v)
+			if v != "" {
+				c.NameI18n[k] = v
 			}
 		}
-		if en := strings.TrimSpace(c.NameI18n["en"]); en != "" {
+		if en := c.NameI18n["en"]; en != "" {
 			c.Name = en
-		} else if ru := strings.TrimSpace(c.NameI18n["ru"]); ru != "" {
+		} else if ru := c.NameI18n["ru"]; ru != "" {
 			c.Name = ru
 		}
 	}
@@ -56,7 +64,7 @@ func (u *UseCase) PatchColumn(ctx context.Context, id uuid.UUID, name, template,
 		c.SystemPromptTemplate = *template
 	}
 	if overlay != nil {
-		if strings.TrimSpace(*overlay) == "" {
+		if *overlay == "" {
 			c.UserCustomPrompt = nil
 		} else {
 			c.UserCustomPrompt = overlay
@@ -73,7 +81,7 @@ func (u *UseCase) PatchColumn(ctx context.Context, id uuid.UUID, name, template,
 	}
 	c.UpdatedAt = time.Now().UTC()
 	if err := u.Repo.Columns.Update(ctx, c); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "update column")
 	}
 	return c, nil
 }
@@ -81,11 +89,11 @@ func (u *UseCase) PatchColumn(ctx context.Context, id uuid.UUID, name, template,
 func (u *UseCase) ResetOverlay(ctx context.Context, id uuid.UUID) (*column.Column, error) {
 	c, err := u.Repo.Columns.Get(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "get column")
 	}
 	c.ResetOverlay()
 	if err := u.Repo.Columns.Update(ctx, c); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "update column")
 	}
 	return c, nil
 }
@@ -93,11 +101,11 @@ func (u *UseCase) ResetOverlay(ctx context.Context, id uuid.UUID) (*column.Colum
 func (u *UseCase) RestoreDefault(ctx context.Context, id uuid.UUID) (*column.Column, error) {
 	c, err := u.Repo.Columns.Get(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "get column")
 	}
 	c.RestoreDefaultPrompt()
 	if err := u.Repo.Columns.Update(ctx, c); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "update column")
 	}
 	return c, nil
 }
@@ -105,21 +113,27 @@ func (u *UseCase) RestoreDefault(ctx context.Context, id uuid.UUID) (*column.Col
 func (u *UseCase) DeleteColumn(ctx context.Context, id uuid.UUID) error {
 	n, err := u.Repo.Columns.CountTasks(ctx, id)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "count column tasks")
 	}
 	if n > 0 {
-		return errors.New("column has tasks")
+		return column.ErrHasTasks
 	}
 	cols, err := u.Repo.Columns.List(ctx)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "list columns")
 	}
 	if len(cols) <= 1 {
-		return errors.New("cannot delete last column")
+		return column.ErrLastColumn
 	}
-	return u.Repo.Columns.Delete(ctx, id)
+	if err := u.Repo.Columns.Delete(ctx, id); err != nil {
+		return errors.Wrap(err, "delete column")
+	}
+	return nil
 }
 
 func (u *UseCase) ReorderColumns(ctx context.Context, ids []uuid.UUID) error {
-	return u.Repo.Columns.Reorder(ctx, ids)
+	if err := u.Repo.Columns.Reorder(ctx, ids); err != nil {
+		return errors.Wrap(err, "reorder columns")
+	}
+	return nil
 }

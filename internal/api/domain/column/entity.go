@@ -51,7 +51,7 @@ type Column struct {
 
 func (c *Column) BuildSystemPrompt() string {
 	base := c.SystemPromptTemplate
-	if c.UserCustomPrompt == nil || strings.TrimSpace(*c.UserCustomPrompt) == "" {
+	if c.UserCustomPrompt == nil || *c.UserCustomPrompt == "" {
 		return base
 	}
 	return base + "\n\n# User overlay\n" + *c.UserCustomPrompt

@@ -71,7 +71,10 @@ export type ContextPackItem = {
   order: number;
 };
 
+export type LLMProvider = "openai" | "opencode" | "custom";
+
 export type Settings = {
+  llm_provider?: LLMProvider;
   llm_base_url: string;
   llm_api_key: string;
   llm_model: string;
@@ -86,6 +89,20 @@ export type Settings = {
   price_input_per_1k?: number;
   price_output_per_1k?: number;
   context_pack?: ContextPackItem[];
+};
+
+export type LLMModelOption = {
+  id: string;
+  name: string;
+};
+
+export type LLMTestResult = {
+  ok: boolean;
+  provider: string;
+  model: string;
+  base_url: string;
+  reply?: string;
+  error?: string;
 };
 
 export type AgentRun = {
@@ -249,6 +266,10 @@ export const api = {
   unarchiveTask: (id: string) => req<Task>(`/api/v1/tasks/${id}/unarchive`, { method: "POST" }),
   settings: () => req<Settings>("/api/v1/settings"),
   saveSettings: (body: Partial<Settings>) => req<Settings>("/api/v1/settings", { method: "PUT", body: JSON.stringify(body) }),
+  llmModels: (provider: string) =>
+    req<{ provider: string; models: LLMModelOption[] }>(`/api/v1/settings/llm/models?provider=${encodeURIComponent(provider)}`),
+  testLLM: (body?: Partial<Settings>) =>
+    req<LLMTestResult>("/api/v1/settings/llm/test", { method: "POST", body: JSON.stringify(body ?? {}) }),
   exportConfig: () => req<ConfigBundle>("/api/v1/settings/export"),
   importConfig: (body: ConfigBundle) =>
     req<ImportConfigResult>("/api/v1/settings/import", { method: "POST", body: JSON.stringify(body) }),

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pkg/errors"
 
 	"kaiban/internal/api/domain/agentrun"
 	"kaiban/internal/api/domain/column"
@@ -36,7 +37,7 @@ func (u *UseCase) startRun(ctx context.Context, t *task.Task, col *column.Column
 		StartedAt:       time.Now().UTC(),
 	}
 	if err := u.Repo.AgentRuns.Create(ctx, r); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "create")
 	}
 	b := st.BaseBudget()
 	b = settings.ApplyBudgetOverride(b, col.Budget.MaxTokens, col.Budget.MaxCostUSD, col.Budget.MaxWallSec, col.Budget.MaxToolCalls, col.Budget.MaxLLMSteps)
@@ -103,17 +104,21 @@ func (u *UseCase) finishRun(ctx context.Context, ar *activeRun, status agentrun.
 }
 
 func (u *UseCase) ListRuns(ctx context.Context, taskID uuid.UUID) ([]*agentrun.Run, error) {
-	return u.Repo.AgentRuns.ListByTask(ctx, taskID)
+	items, err := u.Repo.AgentRuns.ListByTask(ctx, taskID)
+	if err != nil {
+		return nil, errors.Wrap(err, "list agent runs")
+	}
+	return items, nil
 }
 
 func (u *UseCase) GetRun(ctx context.Context, runID uuid.UUID) (*agentrun.Run, error) {
 	r, err := u.Repo.AgentRuns.Get(ctx, runID)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "get agent run")
 	}
 	events, err := u.Repo.AgentRuns.ListEvents(ctx, runID)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "list run events")
 	}
 	r.Events = events
 	return r, nil

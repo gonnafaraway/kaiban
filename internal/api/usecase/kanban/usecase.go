@@ -2,6 +2,7 @@ package kanban
 
 import (
 	"context"
+	"github.com/pkg/errors"
 
 	"kaiban/internal/api/domain/task"
 	"kaiban/internal/api/domain/user"
@@ -30,5 +31,9 @@ type ArchivedTask struct {
 }
 
 func (u *UseCase) Me(ctx context.Context) (*user.User, error) {
-	return u.Repo.Users.GetLocal(ctx)
+	me, err := u.Repo.Users.GetLocal(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "get local user")
+	}
+	return me, nil
 }

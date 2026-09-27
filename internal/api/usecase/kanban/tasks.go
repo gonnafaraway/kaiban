@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pkg/errors"
 
 	"kaiban/internal/api/domain/auditevent"
 	"kaiban/internal/api/domain/column"
@@ -16,19 +17,23 @@ import (
 )
 
 func (u *UseCase) ListTasks(ctx context.Context) ([]*task.Task, error) {
-	return u.Repo.Tasks.List(ctx)
+	items, err := u.Repo.Tasks.List(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "list tasks")
+	}
+	return items, nil
 }
 
 func (u *UseCase) ListArchived(ctx context.Context) ([]ArchivedTask, error) {
 	items, err := u.Repo.Tasks.ListArchived(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "list archive")
 	}
 	out := make([]ArchivedTask, 0, len(items))
 	for _, t := range items {
 		reports, err := u.Repo.Tasks.ListReports(ctx, t.ID)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "list reports")
 		}
 		out = append(out, ArchivedTask{Task: t, Reports: reports})
 	}
@@ -38,11 +43,11 @@ func (u *UseCase) ListArchived(ctx context.Context) ([]ArchivedTask, error) {
 func (u *UseCase) GetTask(ctx context.Context, id uuid.UUID) (*task.Task, []repository.Report, error) {
 	t, err := u.Repo.Tasks.Get(ctx, id)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, errors.Wrap(err, "get task")
 	}
 	reports, err := u.Repo.Tasks.ListReports(ctx, id)
 	if err != nil {
-		return t, nil, err
+		return t, nil, errors.Wrap(err, "list reports")
 	}
 	return t, reports, nil
 }
@@ -50,15 +55,15 @@ func (u *UseCase) GetTask(ctx context.Context, id uuid.UUID) (*task.Task, []repo
 func (u *UseCase) CreateTask(ctx context.Context, title, desc string, vars map[string]string, artifacts task.Artifacts) (*task.Task, error) {
 	col, err := u.Repo.Columns.First(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "first column")
 	}
 	me, err := u.Repo.Users.GetLocal(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "get local user")
 	}
 	t, err := task.New(title, desc, vars, artifacts, col.ID, me.ID)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "new")
 	}
 	t.GitBranch = "kaiban/task-" + t.ID.String()[:8]
 	st, _ := u.Repo.Settings.Get(ctx)
@@ -76,7 +81,7 @@ func (u *UseCase) CreateTask(ctx context.Context, title, desc string, vars map[s
 		_ = integration.EnsureTaskBranch(ctx, u.GitWorkDir, repoURL, defaultBranch, t.GitBranch)
 	}
 	if err := u.Repo.Tasks.Create(ctx, t); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "create")
 	}
 	_ = u.audit(ctx, &t.ID, auditevent.ActorUser, me.Login, "task.created", map[string]any{
 		"title": title, "artifacts": artifacts,
@@ -88,7 +93,7 @@ func (u *UseCase) CreateTask(ctx context.Context, title, desc string, vars map[s
 func (u *UseCase) PatchTask(ctx context.Context, id uuid.UUID, title, desc *string, vars map[string]string, extra *string, artifacts *task.Artifacts, budget *task.BudgetOverride) (*task.Task, error) {
 	t, err := u.Repo.Tasks.Get(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "get task")
 	}
 	if t.IsArchived() {
 		return nil, task.ErrArchived
@@ -116,7 +121,7 @@ func (u *UseCase) PatchTask(ctx context.Context, id uuid.UUID, title, desc *stri
 	}
 	t.UpdatedAt = time.Now().UTC()
 	if err := u.Repo.Tasks.Update(ctx, t); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "update")
 	}
 	u.publish("task.updated", t)
 	return t, nil
@@ -125,20 +130,20 @@ func (u *UseCase) PatchTask(ctx context.Context, id uuid.UUID, title, desc *stri
 func (u *UseCase) Run(ctx context.Context, id uuid.UUID) (*task.Task, error) {
 	t, err := u.Repo.Tasks.Get(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "get task")
 	}
 	prevStatus := t.ExecutionStatus
 	if err := t.MarkQueued(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "mark queued")
 	}
 	if err := u.Repo.Tasks.Update(ctx, t); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "update")
 	}
 	if err := u.Repo.Jobs.Enqueue(ctx, &job.Job{TaskID: t.ID, ColumnID: t.ColumnID}); err != nil {
 		t.ExecutionStatus = prevStatus
 		t.UpdatedAt = time.Now().UTC()
 		_ = u.Repo.Tasks.Update(ctx, t)
-		return nil, err
+		return nil, errors.Wrap(err, "enqueue job")
 	}
 	_ = u.audit(ctx, &t.ID, auditevent.ActorUser, u.localActor(ctx), "agent.started", nil)
 	u.publish("task.updated", t)
@@ -149,11 +154,11 @@ func (u *UseCase) Run(ctx context.Context, id uuid.UUID) (*task.Task, error) {
 func (u *UseCase) Approve(ctx context.Context, id uuid.UUID, comment string) (*task.Task, error) {
 	t, err := u.Repo.Tasks.Get(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "get task")
 	}
 	cur, err := u.Repo.Columns.Get(ctx, t.ColumnID)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "get column")
 	}
 	if err := column.ValidateOutputs(cur.OutputFields, t.StageOutput(t.ColumnID)); err != nil {
 		return nil, fmt.Errorf("%w: %s", task.ErrContractInvalid, err.Error())
@@ -161,7 +166,7 @@ func (u *UseCase) Approve(ctx context.Context, id uuid.UUID, comment string) (*t
 	if cur.RequiresGitDiff {
 		st, err := u.Repo.Settings.Get(ctx)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "get settings")
 		}
 		repoURL, _, _ := u.resolveGitRemote(ctx, st, t.ContextData.Artifacts)
 		_ = integration.RefreshTaskWorktree(ctx, u.GitWorkDir, repoURL, t.GitBranch, st.GitDefaultBranch)
@@ -176,7 +181,7 @@ func (u *UseCase) Approve(ctx context.Context, id uuid.UUID, comment string) (*t
 	}
 	next, err := u.Repo.Columns.Next(ctx, cur.OrderIndex)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "next")
 	}
 	isLast := next == nil
 	var nextID uuid.UUID
@@ -184,10 +189,10 @@ func (u *UseCase) Approve(ctx context.Context, id uuid.UUID, comment string) (*t
 		nextID = next.ID
 	}
 	if err := t.Approve(isLast, nextID); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "approve task")
 	}
 	if err := u.Repo.Tasks.Update(ctx, t); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "update")
 	}
 	_ = u.audit(ctx, &t.ID, auditevent.ActorUser, u.localActor(ctx), "user.approved", map[string]any{"comment": comment})
 	u.publish("task.updated", t)
@@ -197,14 +202,14 @@ func (u *UseCase) Approve(ctx context.Context, id uuid.UUID, comment string) (*t
 func (u *UseCase) Retry(ctx context.Context, id uuid.UUID, comment string) (*task.Task, error) {
 	t, err := u.Repo.Tasks.Get(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "get task")
 	}
 	if err := t.RetryCurrent(comment); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "retry current")
 	}
 	_ = u.Repo.Jobs.CancelQueuedForTask(ctx, t.ID)
 	if err := u.Repo.Tasks.Update(ctx, t); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "update")
 	}
 	_ = u.audit(ctx, &t.ID, auditevent.ActorUser, u.localActor(ctx), "user.retried", map[string]any{"comment": comment})
 	u.publish("task.updated", t)
@@ -214,22 +219,22 @@ func (u *UseCase) Retry(ctx context.Context, id uuid.UUID, comment string) (*tas
 func (u *UseCase) ReturnTo(ctx context.Context, id, columnID uuid.UUID, comment string) (*task.Task, error) {
 	t, err := u.Repo.Tasks.Get(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "get task")
 	}
 	cur, err := u.Repo.Columns.Get(ctx, t.ColumnID)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "get column")
 	}
 	target, err := u.Repo.Columns.Get(ctx, columnID)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "get column")
 	}
 	if err := t.ReturnTo(cur, target, comment); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "return task")
 	}
 	_ = u.Repo.Jobs.CancelQueuedForTask(ctx, t.ID)
 	if err := u.Repo.Tasks.Update(ctx, t); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "update")
 	}
 	_ = u.audit(ctx, &t.ID, auditevent.ActorUser, u.localActor(ctx), "user.returned", map[string]any{"comment": comment, "column_id": columnID.String()})
 	u.publish("task.updated", t)
@@ -239,14 +244,14 @@ func (u *UseCase) ReturnTo(ctx context.Context, id, columnID uuid.UUID, comment 
 func (u *UseCase) Archive(ctx context.Context, id uuid.UUID) (*task.Task, error) {
 	t, err := u.Repo.Tasks.Get(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "get task")
 	}
 	if err := t.Archive(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "archive task")
 	}
 	_ = u.Repo.Jobs.CancelQueuedForTask(ctx, t.ID)
 	if err := u.Repo.Tasks.Update(ctx, t); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "update")
 	}
 	_ = u.audit(ctx, &t.ID, auditevent.ActorUser, u.localActor(ctx), "task.archived", nil)
 	u.publish("task.updated", t)
@@ -256,13 +261,13 @@ func (u *UseCase) Archive(ctx context.Context, id uuid.UUID) (*task.Task, error)
 func (u *UseCase) Unarchive(ctx context.Context, id uuid.UUID) (*task.Task, error) {
 	t, err := u.Repo.Tasks.Get(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "get task")
 	}
 	if err := t.Unarchive(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "unarchive task")
 	}
 	if err := u.Repo.Tasks.Update(ctx, t); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "update")
 	}
 	_ = u.audit(ctx, &t.ID, auditevent.ActorUser, u.localActor(ctx), "task.unarchived", nil)
 	u.publish("task.updated", t)
@@ -270,5 +275,9 @@ func (u *UseCase) Unarchive(ctx context.Context, id uuid.UUID) (*task.Task, erro
 }
 
 func (u *UseCase) Events(ctx context.Context, taskID uuid.UUID) ([]*auditevent.Event, error) {
-	return u.Repo.Audit.ListByTask(ctx, taskID)
+	items, err := u.Repo.Audit.ListByTask(ctx, taskID)
+	if err != nil {
+		return nil, errors.Wrap(err, "list audit events")
+	}
+	return items, nil
 }

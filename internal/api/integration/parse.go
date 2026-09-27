@@ -9,8 +9,15 @@ import (
 
 var jiraKeyRe = regexp.MustCompile(`([A-Z][A-Z0-9]+-\d+)`)
 
+// apiBase strips trailing slashes from an HTTP base URL before joining paths.
+func apiBase(base string) string {
+	for len(base) > 0 && base[len(base)-1] == '/' {
+		base = base[:len(base)-1]
+	}
+	return base
+}
+
 func ParseJiraIssue(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", fmt.Errorf("jira issue is empty")
 	}
@@ -21,7 +28,6 @@ func ParseJiraIssue(raw string) (string, error) {
 }
 
 func ParseConfluencePageID(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", fmt.Errorf("confluence url is empty")
 	}
@@ -44,7 +50,6 @@ func ParseConfluencePageID(raw string) (string, error) {
 }
 
 func ParseGitLabProject(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
 	raw = strings.TrimSuffix(raw, ".git")
 	if raw == "" {
 		return "", fmt.Errorf("gitlab repo is empty")
@@ -64,13 +69,11 @@ func ParseGitLabProject(raw string) (string, error) {
 
 // ParseGitHubRepo returns "owner/repo" from a URL, SSH form, or path.
 func ParseGitHubRepo(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
 	raw = strings.TrimSuffix(raw, ".git")
 	if raw == "" {
 		return "", fmt.Errorf("github repo is empty")
 	}
 	if strings.HasPrefix(raw, "git@") {
-		// git@github.com:owner/repo
 		if i := strings.Index(raw, ":"); i >= 0 {
 			p := strings.Trim(raw[i+1:], "/")
 			p = strings.TrimSuffix(p, ".git")
@@ -98,7 +101,6 @@ func ParseGitHubRepo(raw string) (string, error) {
 }
 
 func IsGitHubHost(raw string) bool {
-	raw = strings.TrimSpace(strings.ToLower(raw))
 	if raw == "" {
 		return false
 	}
@@ -106,7 +108,7 @@ func IsGitHubHost(raw string) bool {
 		return true
 	}
 	if u, err := url.Parse(raw); err == nil && u.Host != "" {
-		h := strings.ToLower(u.Host)
+		h := u.Host
 		return h == "github.com" || strings.HasSuffix(h, ".ghe.com") || strings.Contains(h, "github")
 	}
 	return strings.Contains(raw, "github.com/") || strings.HasPrefix(raw, "github.com/")
@@ -126,7 +128,6 @@ func isDigits(s string) bool {
 
 func AtlassianAuth(email, token string) map[string]string {
 	h := map[string]string{"Accept": "application/json"}
-	email = strings.TrimSpace(email)
 	if email == "" || email == "-" {
 		h["Authorization"] = "Bearer " + token
 		return h

@@ -24,6 +24,8 @@ func Register(app *fiber.App, d Deps) {
 	settings.Put("", d.putSettings)
 	settings.Get("/export", d.exportSettings)
 	settings.Post("/import", d.importSettings)
+	settings.Get("/llm/models", d.listLLMModels)
+	settings.Post("/llm/test", d.testLLM)
 
 	columns := v1.Group("/columns")
 	columns.Get("", d.listColumns)

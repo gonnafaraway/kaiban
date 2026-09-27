@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/pkg/errors"
 
 	"kaiban/internal/api/integration"
 )
@@ -11,11 +12,11 @@ import (
 func (u *UseCase) TaskDiff(ctx context.Context, id uuid.UUID) (map[string]any, error) {
 	t, err := u.Repo.Tasks.Get(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "get task")
 	}
 	st, err := u.Repo.Settings.Get(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "get settings")
 	}
 	repoURL, _, _ := u.resolveGitRemote(ctx, st, t.ContextData.Artifacts)
 	_ = integration.RefreshTaskWorktree(ctx, u.GitWorkDir, repoURL, t.GitBranch, st.GitDefaultBranch)
@@ -41,11 +42,11 @@ func (u *UseCase) TaskDiff(ctx context.Context, id uuid.UUID) (map[string]any, e
 func (u *UseCase) TaskDiffRaw(ctx context.Context, id uuid.UUID) (string, error) {
 	t, err := u.Repo.Tasks.Get(ctx, id)
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(err, "get task")
 	}
 	st, err := u.Repo.Settings.Get(ctx)
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(err, "get settings")
 	}
 	repoURL, _, _ := u.resolveGitRemote(ctx, st, t.ContextData.Artifacts)
 	_ = integration.RefreshTaskWorktree(ctx, u.GitWorkDir, repoURL, t.GitBranch, st.GitDefaultBranch)

@@ -3,7 +3,6 @@ package pg
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/fs"
 	"sort"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/pkg/errors"
 
 	"kaiban/internal/api/domain/agentrun"
 	"kaiban/internal/api/domain/auditevent"
@@ -33,6 +33,24 @@ type Store struct {
 }
 
 func New(db *postgres.Client) *Store { return &Store{db: db} }
+
+func marshalJSON(v any, what string) ([]byte, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, errors.Wrap(err, "marshal "+what)
+	}
+	return b, nil
+}
+
+func unmarshalJSON(data []byte, dest any, what string) error {
+	if len(data) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(data, dest); err != nil {
+		return errors.Wrap(err, "unmarshal "+what)
+	}
+	return nil
+}
 
 func (s *Store) ApplySchema(ctx context.Context) error {
 	if _, err := s.db.Pool.Exec(ctx, `
@@ -123,11 +141,12 @@ func (s *Store) SeedLLM(ctx context.Context, base, key, model string) error {
 	if key == "" {
 		return nil
 	}
+	provider := settings.InferProviderFromURL(base)
 	_, err := s.db.Pool.Exec(ctx, `
 		UPDATE app_settings
-		SET llm_base_url = $1, llm_api_key = $2, llm_model = $3, updated_at = now()
+		SET llm_provider = $1, llm_base_url = $2, llm_api_key = $3, llm_model = $4, updated_at = now()
 		WHERE llm_api_key = '' OR llm_api_key IS NULL
-	`, base, key, model)
+	`, provider, base, key, model)
 	return err
 }
 
@@ -148,12 +167,15 @@ func (s *Store) SeedIntegrations(ctx context.Context, e *env.Env) error {
 		if it.base == "" || it.token == "" {
 			continue
 		}
-		cred, _ := json.Marshal(map[string]string{
+		cred, err := marshalJSON(map[string]string{
 			"email":     it.email,
 			"api_token": it.token,
 			"token":     it.token,
-		})
-		_, err := s.db.Pool.Exec(ctx, `
+		}, "integration credentials")
+		if err != nil {
+			return err
+		}
+		_, err = s.db.Pool.Exec(ctx, `
 			INSERT INTO integrations (id, type, name, base_url, credentials, status, last_error, created_at, updated_at)
 			SELECT $1::uuid, $2, $3, $4, $5::jsonb, 'enabled', '', now(), now()
 			WHERE NOT EXISTS (SELECT 1 FROM integrations WHERE type = $2)
@@ -210,9 +232,15 @@ func (s *Store) NextColumn(ctx context.Context, currentOrder int) (*column.Colum
 }
 
 func (s *Store) CreateColumn(ctx context.Context, c *column.Column) error {
-	i18n, _ := json.Marshal(c.NameI18n)
-	fields, _ := json.Marshal(c.OutputFields)
-	_, err := s.db.Pool.Exec(ctx, `INSERT INTO columns (id,name,name_i18n,system_prompt_default,system_prompt_template,user_custom_prompt,output_fields,max_tokens,max_cost_usd,max_wall_sec,max_tool_calls,max_llm_steps,requires_git_diff,order_index,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+	i18n, err := marshalJSON(c.NameI18n, "column name_i18n")
+	if err != nil {
+		return err
+	}
+	fields, err := marshalJSON(c.OutputFields, "column output_fields")
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Pool.Exec(ctx, `INSERT INTO columns (id,name,name_i18n,system_prompt_default,system_prompt_template,user_custom_prompt,output_fields,max_tokens,max_cost_usd,max_wall_sec,max_tool_calls,max_llm_steps,requires_git_diff,order_index,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 		c.ID, c.Name, i18n, c.SystemPromptDefault, c.SystemPromptTemplate, c.UserCustomPrompt, fields,
 		c.Budget.MaxTokens, c.Budget.MaxCostUSD, c.Budget.MaxWallSec, c.Budget.MaxToolCalls, c.Budget.MaxLLMSteps,
 		c.RequiresGitDiff, c.OrderIndex, c.CreatedAt, c.UpdatedAt)
@@ -220,9 +248,15 @@ func (s *Store) CreateColumn(ctx context.Context, c *column.Column) error {
 }
 
 func (s *Store) UpdateColumn(ctx context.Context, c *column.Column) error {
-	i18n, _ := json.Marshal(c.NameI18n)
-	fields, _ := json.Marshal(c.OutputFields)
-	_, err := s.db.Pool.Exec(ctx, `UPDATE columns SET name=$2, name_i18n=$3, system_prompt_default=$4, system_prompt_template=$5, user_custom_prompt=$6, output_fields=$7, max_tokens=$8, max_cost_usd=$9, max_wall_sec=$10, max_tool_calls=$11, max_llm_steps=$12, requires_git_diff=$13, order_index=$14, updated_at=$15 WHERE id=$1`,
+	i18n, err := marshalJSON(c.NameI18n, "column name_i18n")
+	if err != nil {
+		return err
+	}
+	fields, err := marshalJSON(c.OutputFields, "column output_fields")
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Pool.Exec(ctx, `UPDATE columns SET name=$2, name_i18n=$3, system_prompt_default=$4, system_prompt_template=$5, user_custom_prompt=$6, output_fields=$7, max_tokens=$8, max_cost_usd=$9, max_wall_sec=$10, max_tool_calls=$11, max_llm_steps=$12, requires_git_diff=$13, order_index=$14, updated_at=$15 WHERE id=$1`,
 		c.ID, c.Name, i18n, c.SystemPromptDefault, c.SystemPromptTemplate, c.UserCustomPrompt, fields,
 		c.Budget.MaxTokens, c.Budget.MaxCostUSD, c.Budget.MaxWallSec, c.Budget.MaxToolCalls, c.Budget.MaxLLMSteps,
 		c.RequiresGitDiff, c.OrderIndex, c.UpdatedAt)
@@ -271,8 +305,12 @@ func scanColumn(row rowScanner) (*column.Column, error) {
 	if err != nil {
 		return nil, err
 	}
-	_ = json.Unmarshal(i18n, &c.NameI18n)
-	_ = json.Unmarshal(fields, &c.OutputFields)
+	if err := unmarshalJSON(i18n, &c.NameI18n, "column name_i18n"); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(fields, &c.OutputFields, "column output_fields"); err != nil {
+		return nil, err
+	}
 	if c.OutputFields == nil {
 		c.OutputFields = []column.OutputField{}
 	}
@@ -323,25 +361,37 @@ func (s *Store) GetTask(ctx context.Context, id uuid.UUID) (*task.Task, error) {
 }
 
 func (s *Store) CreateTask(ctx context.Context, t *task.Task) error {
-	vars, _ := json.Marshal(t.Variables)
-	ctxd, _ := json.Marshal(t.ContextData)
+	vars, err := marshalJSON(t.Variables, "task variables")
+	if err != nil {
+		return err
+	}
+	ctxd, err := marshalJSON(t.ContextData, "task context_data")
+	if err != nil {
+		return err
+	}
 	var branch any
 	if t.GitBranch != "" {
 		branch = t.GitBranch
 	}
-	_, err := s.db.Pool.Exec(ctx, `INSERT INTO tasks (id,title,description,variables,column_id,execution_status,git_branch,git_pr_url,git_push_status,git_pr_status,current_report,context_data,created_by,created_at,updated_at,archived_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+	_, err = s.db.Pool.Exec(ctx, `INSERT INTO tasks (id,title,description,variables,column_id,execution_status,git_branch,git_pr_url,git_push_status,git_pr_status,current_report,context_data,created_by,created_at,updated_at,archived_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 		t.ID, t.Title, t.Description, vars, t.ColumnID, string(t.ExecutionStatus), branch, t.GitPRURL, t.GitPushStatus, t.GitPRStatus, t.CurrentReport, ctxd, t.CreatedBy, t.CreatedAt, t.UpdatedAt, t.ArchivedAt)
 	return err
 }
 
 func (s *Store) UpdateTask(ctx context.Context, t *task.Task) error {
-	vars, _ := json.Marshal(t.Variables)
-	ctxd, _ := json.Marshal(t.ContextData)
+	vars, err := marshalJSON(t.Variables, "task variables")
+	if err != nil {
+		return err
+	}
+	ctxd, err := marshalJSON(t.ContextData, "task context_data")
+	if err != nil {
+		return err
+	}
 	var branch any
 	if t.GitBranch != "" {
 		branch = t.GitBranch
 	}
-	_, err := s.db.Pool.Exec(ctx, `UPDATE tasks SET title=$2,description=$3,variables=$4,column_id=$5,execution_status=$6,git_branch=$7,git_pr_url=$8,git_push_status=$9,git_pr_status=$10,current_report=$11,context_data=$12,updated_at=$13,archived_at=$14 WHERE id=$1`,
+	_, err = s.db.Pool.Exec(ctx, `UPDATE tasks SET title=$2,description=$3,variables=$4,column_id=$5,execution_status=$6,git_branch=$7,git_pr_url=$8,git_push_status=$9,git_pr_status=$10,current_report=$11,context_data=$12,updated_at=$13,archived_at=$14 WHERE id=$1`,
 		t.ID, t.Title, t.Description, vars, t.ColumnID, string(t.ExecutionStatus), branch, t.GitPRURL, t.GitPushStatus, t.GitPRStatus, t.CurrentReport, ctxd, t.UpdatedAt, t.ArchivedAt)
 	return err
 }
@@ -377,8 +427,12 @@ func scanTask(row rowScanner) (*task.Task, error) {
 		return nil, err
 	}
 	t.ExecutionStatus = task.ExecutionStatus(status)
-	_ = json.Unmarshal(vars, &t.Variables)
-	_ = json.Unmarshal(ctxd, &t.ContextData)
+	if err := unmarshalJSON(vars, &t.Variables, "task variables"); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(ctxd, &t.ContextData, "task context_data"); err != nil {
+		return nil, err
+	}
 	if t.Variables == nil {
 		t.Variables = map[string]string{}
 	}
@@ -508,8 +562,11 @@ func (s *Store) AddAudit(ctx context.Context, e *auditevent.Event) error {
 	if e.CreatedAt.IsZero() {
 		e.CreatedAt = time.Now().UTC()
 	}
-	payload, _ := json.Marshal(e.Payload)
-	_, err := s.db.Pool.Exec(ctx, `INSERT INTO audit_events (id,task_id,actor_type,actor_id,action,payload,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+	payload, err := marshalJSON(e.Payload, "audit payload")
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Pool.Exec(ctx, `INSERT INTO audit_events (id,task_id,actor_type,actor_id,action,payload,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
 		e.ID, e.TaskID, string(e.ActorType), e.ActorID, e.Action, payload, e.CreatedAt)
 	return err
 }
@@ -529,7 +586,9 @@ func (s *Store) ListAudit(ctx context.Context, taskID uuid.UUID) ([]*auditevent.
 			return nil, err
 		}
 		e.ActorType = auditevent.ActorType(at)
-		_ = json.Unmarshal(payload, &e.Payload)
+		if err := unmarshalJSON(payload, &e.Payload, "audit payload"); err != nil {
+			return nil, err
+		}
 		out = append(out, e)
 	}
 	return out, rows.Err()
@@ -539,34 +598,44 @@ func (s *Store) GetSettings(ctx context.Context) (*settings.Settings, error) {
 	st := &settings.Settings{ContextPack: []settings.ContextPackItem{}}
 	var pack []byte
 	err := s.db.Pool.QueryRow(ctx, `
-		SELECT id,llm_base_url,llm_api_key,llm_model,git_repo_url,git_default_branch,locale,
+		SELECT id,COALESCE(llm_provider,'openai'),llm_base_url,llm_api_key,llm_model,git_repo_url,git_default_branch,locale,
 			COALESCE(max_tokens,200000), COALESCE(max_cost_usd,5), COALESCE(max_wall_sec,1800),
 			COALESCE(max_tool_calls,80), COALESCE(max_llm_steps,40),
 			COALESCE(price_input_per_1k,0.002), COALESCE(price_output_per_1k,0.008),
 			COALESCE(context_pack, '[]'::jsonb),
 			updated_at
 		FROM app_settings LIMIT 1`).
-		Scan(&st.ID, &st.LLMBaseURL, &st.LLMAPIKey, &st.LLMModel, &st.GitRepoURL, &st.GitDefaultBranch, &st.Locale,
+		Scan(&st.ID, &st.LLMProvider, &st.LLMBaseURL, &st.LLMAPIKey, &st.LLMModel, &st.GitRepoURL, &st.GitDefaultBranch, &st.Locale,
 			&st.MaxTokens, &st.MaxCostUSD, &st.MaxWallSec, &st.MaxToolCalls, &st.MaxLLMSteps,
 			&st.PriceInputPer1K, &st.PriceOutputPer1K, &pack, &st.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
-	_ = json.Unmarshal(pack, &st.ContextPack)
+	if err := unmarshalJSON(pack, &st.ContextPack, "context pack"); err != nil {
+		return nil, err
+	}
 	if st.ContextPack == nil {
 		st.ContextPack = []settings.ContextPackItem{}
+	}
+	if st.LLMProvider == "" {
+		st.LLMProvider = settings.InferProviderFromURL(st.LLMBaseURL)
+	} else {
+		st.LLMProvider = settings.NormalizeProvider(st.LLMProvider)
 	}
 	return st, nil
 }
 
 func (s *Store) UpdateSettings(ctx context.Context, st *settings.Settings) error {
-	pack, _ := json.Marshal(st.ContextPack)
-	_, err := s.db.Pool.Exec(ctx, `
-		UPDATE app_settings SET llm_base_url=$2,llm_api_key=$3,llm_model=$4,git_repo_url=$5,git_default_branch=$6,locale=$7,
-			max_tokens=$8,max_cost_usd=$9,max_wall_sec=$10,max_tool_calls=$11,max_llm_steps=$12,
-			price_input_per_1k=$13,price_output_per_1k=$14,context_pack=$15,updated_at=now()
+	pack, err := marshalJSON(st.ContextPack, "context pack")
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Pool.Exec(ctx, `
+		UPDATE app_settings SET llm_provider=$2,llm_base_url=$3,llm_api_key=$4,llm_model=$5,git_repo_url=$6,git_default_branch=$7,locale=$8,
+			max_tokens=$9,max_cost_usd=$10,max_wall_sec=$11,max_tool_calls=$12,max_llm_steps=$13,
+			price_input_per_1k=$14,price_output_per_1k=$15,context_pack=$16,updated_at=now()
 		WHERE id=$1`,
-		st.ID, st.LLMBaseURL, st.LLMAPIKey, st.LLMModel, st.GitRepoURL, st.GitDefaultBranch, st.Locale,
+		st.ID, st.LLMProvider, st.LLMBaseURL, st.LLMAPIKey, st.LLMModel, st.GitRepoURL, st.GitDefaultBranch, st.Locale,
 		st.MaxTokens, st.MaxCostUSD, st.MaxWallSec, st.MaxToolCalls, st.MaxLLMSteps,
 		st.PriceInputPer1K, st.PriceOutputPer1K, pack)
 	return err
@@ -590,8 +659,11 @@ func (s *Store) UpdateAgentRun(ctx context.Context, r *agentrun.Run) error {
 }
 
 func (s *Store) AddAgentRunEvent(ctx context.Context, e *agentrun.Event) error {
-	payload, _ := json.Marshal(e.Payload)
-	_, err := s.db.Pool.Exec(ctx, `
+	payload, err := marshalJSON(e.Payload, "run event payload")
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Pool.Exec(ctx, `
 		INSERT INTO agent_run_events (id,run_id,seq,kind,message,payload,created_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
 		e.ID, e.RunID, e.Seq, e.Kind, e.Message, payload, e.CreatedAt)
@@ -638,7 +710,9 @@ func (s *Store) ListAgentRunEvents(ctx context.Context, runID uuid.UUID) ([]agen
 		if err := rows.Scan(&e.ID, &e.RunID, &e.Seq, &e.Kind, &e.Message, &payload, &e.CreatedAt); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal(payload, &e.Payload)
+		if err := unmarshalJSON(payload, &e.Payload, "run event payload"); err != nil {
+			return nil, err
+		}
 		if e.Payload == nil {
 			e.Payload = map[string]any{}
 		}
@@ -682,15 +756,21 @@ func (s *Store) GetIntegration(ctx context.Context, id uuid.UUID) (*domint.Integ
 }
 
 func (s *Store) CreateIntegration(ctx context.Context, i *domint.Integration) error {
-	cred, _ := json.Marshal(i.Credentials)
-	_, err := s.db.Pool.Exec(ctx, `INSERT INTO integrations (id,type,name,base_url,credentials,status,last_error,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+	cred, err := marshalJSON(i.Credentials, "integration credentials")
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Pool.Exec(ctx, `INSERT INTO integrations (id,type,name,base_url,credentials,status,last_error,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
 		i.ID, string(i.Type), i.Name, i.BaseURL, cred, string(i.Status), i.LastError, i.CreatedAt, i.UpdatedAt)
 	return err
 }
 
 func (s *Store) UpdateIntegration(ctx context.Context, i *domint.Integration) error {
-	cred, _ := json.Marshal(i.Credentials)
-	_, err := s.db.Pool.Exec(ctx, `UPDATE integrations SET type=$2,name=$3,base_url=$4,credentials=$5,status=$6,last_error=$7,updated_at=$8 WHERE id=$1`,
+	cred, err := marshalJSON(i.Credentials, "integration credentials")
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Pool.Exec(ctx, `UPDATE integrations SET type=$2,name=$3,base_url=$4,credentials=$5,status=$6,last_error=$7,updated_at=$8 WHERE id=$1`,
 		i.ID, string(i.Type), i.Name, i.BaseURL, cred, string(i.Status), i.LastError, i.UpdatedAt)
 	return err
 }
@@ -710,7 +790,9 @@ func scanInt(row rowScanner) (*domint.Integration, error) {
 	}
 	i.Type = domint.Type(typ)
 	i.Status = domint.Status(st)
-	_ = json.Unmarshal(cred, &i.Credentials)
+	if err := unmarshalJSON(cred, &i.Credentials, "integration credentials"); err != nil {
+		return nil, err
+	}
 	return i, nil
 }
 
@@ -737,17 +819,29 @@ func (s *Store) GetMCP(ctx context.Context, id uuid.UUID) (*mcpserver.Server, er
 }
 
 func (s *Store) CreateMCP(ctx context.Context, m *mcpserver.Server) error {
-	h, _ := json.Marshal(m.Headers)
-	c, _ := json.Marshal(m.Capabilities)
-	_, err := s.db.Pool.Exec(ctx, `INSERT INTO mcp_servers (id,name,endpoint,headers,capabilities,status,last_error,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+	h, err := marshalJSON(m.Headers, "mcp headers")
+	if err != nil {
+		return err
+	}
+	c, err := marshalJSON(m.Capabilities, "mcp capabilities")
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Pool.Exec(ctx, `INSERT INTO mcp_servers (id,name,endpoint,headers,capabilities,status,last_error,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
 		m.ID, m.Name, m.Endpoint, h, c, string(m.Status), m.LastError, m.CreatedAt, m.UpdatedAt)
 	return err
 }
 
 func (s *Store) UpdateMCP(ctx context.Context, m *mcpserver.Server) error {
-	h, _ := json.Marshal(m.Headers)
-	c, _ := json.Marshal(m.Capabilities)
-	_, err := s.db.Pool.Exec(ctx, `UPDATE mcp_servers SET name=$2,endpoint=$3,headers=$4,capabilities=$5,status=$6,last_error=$7,updated_at=$8 WHERE id=$1`,
+	h, err := marshalJSON(m.Headers, "mcp headers")
+	if err != nil {
+		return err
+	}
+	c, err := marshalJSON(m.Capabilities, "mcp capabilities")
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Pool.Exec(ctx, `UPDATE mcp_servers SET name=$2,endpoint=$3,headers=$4,capabilities=$5,status=$6,last_error=$7,updated_at=$8 WHERE id=$1`,
 		m.ID, m.Name, m.Endpoint, h, c, string(m.Status), m.LastError, m.UpdatedAt)
 	return err
 }
@@ -766,7 +860,11 @@ func scanMCP(row rowScanner) (*mcpserver.Server, error) {
 		return nil, err
 	}
 	m.Status = mcpserver.Status(st)
-	_ = json.Unmarshal(h, &m.Headers)
-	_ = json.Unmarshal(c, &m.Capabilities)
+	if err := unmarshalJSON(h, &m.Headers, "mcp headers"); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(c, &m.Capabilities, "mcp capabilities"); err != nil {
+		return nil, err
+	}
 	return m, nil
 }

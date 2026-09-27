@@ -1,20 +1,43 @@
 package handlers
 
 import (
-	"errors"
-
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/pkg/errors"
 
 	"kaiban/internal/api/domain/agentrun"
 	"kaiban/internal/api/domain/task"
-	httptransport "kaiban/internal/api/transport/http"
 )
+
+type createTaskBody struct {
+	Title       string            `json:"title"`
+	Description string            `json:"description"`
+	Variables   map[string]string `json:"variables"`
+	Artifacts   task.Artifacts    `json:"artifacts"`
+}
+
+type patchTaskBody struct {
+	Title             *string              `json:"title"`
+	Description       *string              `json:"description"`
+	Variables         map[string]string    `json:"variables"`
+	ExtraInstructions *string              `json:"extra_instructions"`
+	Artifacts         *task.Artifacts      `json:"artifacts"`
+	Budget            *task.BudgetOverride `json:"budget"`
+}
+
+type commentBody struct {
+	Comment string `json:"comment"`
+}
+
+type returnTaskBody struct {
+	ColumnID uuid.UUID `json:"column_id"`
+	Comment  string    `json:"comment"`
+}
 
 func (d Deps) listTasks(c *fiber.Ctx) error {
 	items, err := d.UC.ListTasks(c.Context())
 	if err != nil {
-		return httptransport.JSONError(c, 500, "internal", err.Error())
+		return respondError(c, errors.Wrap(err, "list tasks"))
 	}
 	if items == nil {
 		items = []*task.Task{}
@@ -25,7 +48,7 @@ func (d Deps) listTasks(c *fiber.Ctx) error {
 func (d Deps) listArchive(c *fiber.Ctx) error {
 	items, err := d.UC.ListArchived(c.Context())
 	if err != nil {
-		return httptransport.JSONError(c, 500, "internal", err.Error())
+		return respondError(c, errors.Wrap(err, "list archive"))
 	}
 	out := make([]fiber.Map, 0, len(items))
 	for _, item := range items {
@@ -35,18 +58,13 @@ func (d Deps) listArchive(c *fiber.Ctx) error {
 }
 
 func (d Deps) createTask(c *fiber.Ctx) error {
-	var body struct {
-		Title       string            `json:"title"`
-		Description string            `json:"description"`
-		Variables   map[string]string `json:"variables"`
-		Artifacts   task.Artifacts    `json:"artifacts"`
-	}
-	if err := c.BodyParser(&body); err != nil {
-		return httptransport.JSONError(c, 400, "bad_request", err.Error())
+	var body createTaskBody
+	if err := parseBody(c, &body); err != nil {
+		return respondError(c, errors.Wrap(err, "create task"))
 	}
 	t, err := d.UC.CreateTask(c.Context(), body.Title, body.Description, body.Variables, body.Artifacts)
 	if err != nil {
-		return mapDomainErr(c, err)
+		return respondError(c, errors.Wrap(err, "create task"))
 	}
 	return c.Status(201).JSON(t)
 }
@@ -54,11 +72,11 @@ func (d Deps) createTask(c *fiber.Ctx) error {
 func (d Deps) getTask(c *fiber.Ctx) error {
 	id, err := parseID(c)
 	if err != nil {
-		return err
+		return respondError(c, errors.Wrap(err, "get task"))
 	}
 	t, reports, err := d.UC.GetTask(c.Context(), id)
 	if err != nil {
-		return httptransport.JSONError(c, 404, "not_found", err.Error())
+		return respondError(c, errors.Wrap(ErrNotFound, err.Error()))
 	}
 	return c.JSON(taskPayload(t, reports))
 }
@@ -66,11 +84,11 @@ func (d Deps) getTask(c *fiber.Ctx) error {
 func (d Deps) taskDiff(c *fiber.Ctx) error {
 	id, err := parseID(c)
 	if err != nil {
-		return err
+		return respondError(c, errors.Wrap(err, "task diff"))
 	}
 	out, err := d.UC.TaskDiff(c.Context(), id)
 	if err != nil {
-		return httptransport.JSONError(c, 404, "not_found", err.Error())
+		return respondError(c, errors.Wrap(ErrNotFound, err.Error()))
 	}
 	return c.JSON(out)
 }
@@ -78,11 +96,11 @@ func (d Deps) taskDiff(c *fiber.Ctx) error {
 func (d Deps) taskDiffRaw(c *fiber.Ctx) error {
 	id, err := parseID(c)
 	if err != nil {
-		return err
+		return respondError(c, errors.Wrap(err, "task diff raw"))
 	}
 	raw, err := d.UC.TaskDiffRaw(c.Context(), id)
 	if err != nil {
-		return httptransport.JSONError(c, 400, "bad_request", err.Error())
+		return respondError(c, errors.Wrap(err, "task diff raw"))
 	}
 	c.Set("Content-Type", "text/plain; charset=utf-8")
 	return c.SendString(raw)
@@ -91,22 +109,15 @@ func (d Deps) taskDiffRaw(c *fiber.Ctx) error {
 func (d Deps) patchTask(c *fiber.Ctx) error {
 	id, err := parseID(c)
 	if err != nil {
-		return err
+		return respondError(c, errors.Wrap(err, "patch task"))
 	}
-	var body struct {
-		Title             *string              `json:"title"`
-		Description       *string              `json:"description"`
-		Variables         map[string]string    `json:"variables"`
-		ExtraInstructions *string              `json:"extra_instructions"`
-		Artifacts         *task.Artifacts      `json:"artifacts"`
-		Budget            *task.BudgetOverride `json:"budget"`
-	}
-	if err := c.BodyParser(&body); err != nil {
-		return httptransport.JSONError(c, 400, "bad_request", err.Error())
+	var body patchTaskBody
+	if err := parseBody(c, &body); err != nil {
+		return respondError(c, errors.Wrap(err, "patch task"))
 	}
 	t, err := d.UC.PatchTask(c.Context(), id, body.Title, body.Description, body.Variables, body.ExtraInstructions, body.Artifacts, body.Budget)
 	if err != nil {
-		return mapDomainErr(c, err)
+		return respondError(c, errors.Wrap(err, "patch task"))
 	}
 	return c.JSON(t)
 }
@@ -114,11 +125,11 @@ func (d Deps) patchTask(c *fiber.Ctx) error {
 func (d Deps) taskEvents(c *fiber.Ctx) error {
 	id, err := parseID(c)
 	if err != nil {
-		return err
+		return respondError(c, errors.Wrap(err, "task events"))
 	}
 	ev, err := d.UC.Events(c.Context(), id)
 	if err != nil {
-		return httptransport.JSONError(c, 500, "internal", err.Error())
+		return respondError(c, errors.Wrap(err, "task events"))
 	}
 	return c.JSON(ev)
 }
@@ -126,11 +137,11 @@ func (d Deps) taskEvents(c *fiber.Ctx) error {
 func (d Deps) listRuns(c *fiber.Ctx) error {
 	id, err := parseID(c)
 	if err != nil {
-		return err
+		return respondError(c, errors.Wrap(err, "list task runs"))
 	}
 	runs, err := d.UC.ListRuns(c.Context(), id)
 	if err != nil {
-		return httptransport.JSONError(c, 500, "internal", err.Error())
+		return respondError(c, errors.Wrap(err, "list task runs"))
 	}
 	if runs == nil {
 		runs = []*agentrun.Run{}
@@ -141,11 +152,11 @@ func (d Deps) listRuns(c *fiber.Ctx) error {
 func (d Deps) getRun(c *fiber.Ctx) error {
 	id, err := parseID(c)
 	if err != nil {
-		return err
+		return respondError(c, errors.Wrap(err, "get run"))
 	}
 	run, err := d.UC.GetRun(c.Context(), id)
 	if err != nil {
-		return httptransport.JSONError(c, 404, "not_found", err.Error())
+		return respondError(c, errors.Wrap(ErrNotFound, err.Error()))
 	}
 	return c.JSON(run)
 }
@@ -153,11 +164,11 @@ func (d Deps) getRun(c *fiber.Ctx) error {
 func (d Deps) run(c *fiber.Ctx) error {
 	id, err := parseID(c)
 	if err != nil {
-		return err
+		return respondError(c, errors.Wrap(err, "run task"))
 	}
 	t, err := d.UC.Run(c.Context(), id)
 	if err != nil {
-		return mapDomainErr(c, err)
+		return respondError(c, errors.Wrap(err, "run task"))
 	}
 	return c.JSON(t)
 }
@@ -165,20 +176,15 @@ func (d Deps) run(c *fiber.Ctx) error {
 func (d Deps) approve(c *fiber.Ctx) error {
 	id, err := parseID(c)
 	if err != nil {
-		return err
+		return respondError(c, errors.Wrap(err, "approve task"))
 	}
-	var body struct {
-		Comment string `json:"comment"`
-	}
+	var body commentBody
 	if err := parseOptionalBody(c, &body); err != nil {
-		return err
+		return respondError(c, errors.Wrap(err, "approve task"))
 	}
 	t, err := d.UC.Approve(c.Context(), id, body.Comment)
 	if err != nil {
-		if errors.Is(err, task.ErrNotSucceeded) {
-			return httptransport.JSONError(c, 409, "conflict", err.Error())
-		}
-		return mapDomainErr(c, err)
+		return respondError(c, errors.Wrap(err, "approve task"))
 	}
 	return c.JSON(t)
 }
@@ -186,17 +192,15 @@ func (d Deps) approve(c *fiber.Ctx) error {
 func (d Deps) retry(c *fiber.Ctx) error {
 	id, err := parseID(c)
 	if err != nil {
-		return err
+		return respondError(c, errors.Wrap(err, "retry task"))
 	}
-	var body struct {
-		Comment string `json:"comment"`
-	}
+	var body commentBody
 	if err := parseOptionalBody(c, &body); err != nil {
-		return err
+		return respondError(c, errors.Wrap(err, "retry task"))
 	}
 	t, err := d.UC.Retry(c.Context(), id, body.Comment)
 	if err != nil {
-		return mapDomainErr(c, err)
+		return respondError(c, errors.Wrap(err, "retry task"))
 	}
 	return c.JSON(t)
 }
@@ -204,18 +208,15 @@ func (d Deps) retry(c *fiber.Ctx) error {
 func (d Deps) returnTo(c *fiber.Ctx) error {
 	id, err := parseID(c)
 	if err != nil {
-		return err
+		return respondError(c, errors.Wrap(err, "return task"))
 	}
-	var body struct {
-		ColumnID uuid.UUID `json:"column_id"`
-		Comment  string    `json:"comment"`
-	}
-	if err := c.BodyParser(&body); err != nil {
-		return httptransport.JSONError(c, 400, "bad_request", err.Error())
+	var body returnTaskBody
+	if err := parseBody(c, &body); err != nil {
+		return respondError(c, errors.Wrap(err, "return task"))
 	}
 	t, err := d.UC.ReturnTo(c.Context(), id, body.ColumnID, body.Comment)
 	if err != nil {
-		return mapDomainErr(c, err)
+		return respondError(c, errors.Wrap(err, "return task"))
 	}
 	return c.JSON(t)
 }
@@ -223,11 +224,11 @@ func (d Deps) returnTo(c *fiber.Ctx) error {
 func (d Deps) archive(c *fiber.Ctx) error {
 	id, err := parseID(c)
 	if err != nil {
-		return err
+		return respondError(c, errors.Wrap(err, "archive task"))
 	}
 	t, err := d.UC.Archive(c.Context(), id)
 	if err != nil {
-		return mapDomainErr(c, err)
+		return respondError(c, errors.Wrap(err, "archive task"))
 	}
 	return c.JSON(t)
 }
@@ -235,11 +236,11 @@ func (d Deps) archive(c *fiber.Ctx) error {
 func (d Deps) unarchive(c *fiber.Ctx) error {
 	id, err := parseID(c)
 	if err != nil {
-		return err
+		return respondError(c, errors.Wrap(err, "unarchive task"))
 	}
 	t, err := d.UC.Unarchive(c.Context(), id)
 	if err != nil {
-		return mapDomainErr(c, err)
+		return respondError(c, errors.Wrap(err, "unarchive task"))
 	}
 	return c.JSON(t)
 }
