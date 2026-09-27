@@ -1,4 +1,4 @@
-package kanban
+package agent
 
 import (
 	"context"
@@ -16,6 +16,8 @@ import (
 	"kaiban/internal/api/domain/task"
 )
 
+// activeRun is the in-memory state of a run: the stored row plus the budget and
+// counters the loop checks between steps.
 type activeRun struct {
 	run               *agentrun.Run
 	seq               int
@@ -24,7 +26,7 @@ type activeRun struct {
 	started           time.Time
 }
 
-func (u *UseCase) startRun(ctx context.Context, t *task.Task, col *column.Column, st *settings.Settings, systemPrompt, packHash string) (*activeRun, error) {
+func (u *Runner) startRun(ctx context.Context, t *task.Task, col *column.Column, st *settings.Settings, systemPrompt, packHash string) (*activeRun, error) {
 	sum := sha256.Sum256([]byte(systemPrompt))
 	r := &agentrun.Run{
 		ID:              uuid.New(),
@@ -50,8 +52,8 @@ func (u *UseCase) startRun(ctx context.Context, t *task.Task, col *column.Column
 	}, nil
 }
 
-func (u *UseCase) runLog(ctx context.Context, ar *activeRun, taskID uuid.UUID, kind, message string, extra map[string]any) {
-	u.agentLog(taskID, kind, message, extra)
+func (u *Runner) runLog(ctx context.Context, ar *activeRun, taskID uuid.UUID, kind, message string, extra map[string]any) {
+	u.AgentLog(taskID, kind, message, extra)
 	if ar == nil || u.Repo.AgentRuns == nil {
 		return
 	}
@@ -91,19 +93,24 @@ func (ar *activeRun) checkBudget() (stop bool, reason string) {
 	return false, ""
 }
 
-func (u *UseCase) finishRun(ctx context.Context, ar *activeRun, status agentrun.Status, reason string) {
+// finishRun closes the run row. Callers must handle the error: a lost run
+// update leaves the run stuck in "running".
+func (u *Runner) finishRun(ctx context.Context, ar *activeRun, status agentrun.Status, reason string) error {
 	if ar == nil || u.Repo.AgentRuns == nil {
-		return
+		return nil
 	}
 	now := time.Now().UTC()
 	ar.run.Status = status
 	ar.run.StopReason = reason
 	ar.run.FinishedAt = &now
 	ar.run.CostUSD = settings.EstimateCostUSD(ar.run.TokensIn, ar.run.TokensOut, ar.priceIn, ar.priceOut)
-	_ = u.Repo.AgentRuns.Update(ctx, ar.run)
+	if err := u.Repo.AgentRuns.Update(ctx, ar.run); err != nil {
+		return errors.Wrap(err, "update agent run")
+	}
+	return nil
 }
 
-func (u *UseCase) ListRuns(ctx context.Context, taskID uuid.UUID) ([]*agentrun.Run, error) {
+func (u *Runner) ListRuns(ctx context.Context, taskID uuid.UUID) ([]*agentrun.Run, error) {
 	items, err := u.Repo.AgentRuns.ListByTask(ctx, taskID)
 	if err != nil {
 		return nil, errors.Wrap(err, "list agent runs")
@@ -111,7 +118,7 @@ func (u *UseCase) ListRuns(ctx context.Context, taskID uuid.UUID) ([]*agentrun.R
 	return items, nil
 }
 
-func (u *UseCase) GetRun(ctx context.Context, runID uuid.UUID) (*agentrun.Run, error) {
+func (u *Runner) GetRun(ctx context.Context, runID uuid.UUID) (*agentrun.Run, error) {
 	r, err := u.Repo.AgentRuns.Get(ctx, runID)
 	if err != nil {
 		return nil, errors.Wrap(err, "get agent run")

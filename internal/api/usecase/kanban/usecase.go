@@ -1,39 +1,28 @@
+// Package kanban assembles the use case layer: the board itself plus the agent
+// and config services, exposed to the transport layer as one facade.
 package kanban
 
 import (
-	"context"
-	"github.com/pkg/errors"
-
-	"kaiban/internal/api/domain/task"
-	"kaiban/internal/api/domain/user"
-	"kaiban/internal/api/integration"
+	"kaiban/internal/api/integration/llm"
 	"kaiban/internal/api/repository"
+	"kaiban/internal/api/usecase/agent"
+	"kaiban/internal/api/usecase/config"
+	"kaiban/internal/api/usecase/core"
 )
 
-type Publisher interface {
-	Publish(event string, payload any)
-}
-
+// UseCase is the facade handlers and services talk to. The three services are
+// embedded, so every board/agent/config method is promoted onto it.
 type UseCase struct {
-	Repo       *repository.Repository
-	LLM        integration.LLM
-	GitWorkDir string
-	Bus        Publisher
+	*Board
+	*agent.Runner
+	*config.Manager
 }
 
-func Prepare(repo *repository.Repository, llm integration.LLM, gitDir string, bus Publisher) *UseCase {
-	return &UseCase{Repo: repo, LLM: llm, GitWorkDir: gitDir, Bus: bus}
-}
-
-type ArchivedTask struct {
-	Task    *task.Task
-	Reports []repository.Report
-}
-
-func (u *UseCase) Me(ctx context.Context) (*user.User, error) {
-	me, err := u.Repo.Users.GetLocal(ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, "get local user")
+func Prepare(repo *repository.Repository, client llm.LLM, gitDir string, bus core.Publisher) *UseCase {
+	deps := &core.Deps{Repo: repo, LLM: client, GitWorkDir: gitDir, Bus: bus}
+	return &UseCase{
+		Board:   NewBoard(deps),
+		Runner:  agent.New(deps),
+		Manager: config.New(deps),
 	}
-	return me, nil
 }

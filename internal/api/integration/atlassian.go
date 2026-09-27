@@ -1,21 +1,27 @@
 package integration
 
 import (
-	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"html"
-	"io"
 	"net/http"
 	"net/url"
-	"os/exec"
-	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/pkg/errors"
+
+	"kaiban/internal/api/textutil"
 )
+
+// maxPageChars caps Confluence text we read or write back.
+const maxPageChars = 12000
+
+type confluenceWriteArgs struct {
+	ID      string `json:"id"`
+	Body    string `json:"body"`
+	Heading string `json:"heading"`
+}
 
 type confluenceStorageBody struct {
 	Value string `json:"value"`
@@ -47,8 +53,86 @@ type confluencePageDoc struct {
 	Body    confluencePageBody `json:"body"`
 }
 
-type gitlabProjectMeta struct {
-	DefaultBranch string `json:"default_branch"`
+// AtlassianAuth builds headers for Jira/Confluence: basic for cloud, bearer for PAT.
+func AtlassianAuth(email, token string) map[string]string {
+	h := map[string]string{"Accept": "application/json"}
+	if email == "" || email == "-" {
+		h["Authorization"] = "Bearer " + token
+		return h
+	}
+	h["Authorization"] = basic(email, token)
+	return h
+}
+
+func basic(email, token string) string {
+	return "Basic " + base64.StdEncoding.EncodeToString([]byte(email+":"+token))
+}
+
+func JiraTools(base, email, token string) []Tool {
+	h := AtlassianAuth(email, token)
+	base = apiBase(base)
+	return []Tool{
+		HTTPTool{"jira_search", "Search Jira issues with JQL", http.MethodGet, base + "/rest/api/2/search", h, map[string]any{"type": "object", "properties": map[string]any{"jql": map[string]any{"type": "string"}, "maxResults": map[string]any{"type": "integer"}}}},
+		HTTPTool{"jira_get_issue", "Get Jira issue by key", http.MethodGet, base + "/rest/api/2/issue/{issueKey}", h, map[string]any{"type": "object", "properties": map[string]any{"issueKey": map[string]any{"type": "string"}}, "required": []string{"issueKey"}}},
+		HTTPTool{"jira_create_issue", "Create Jira issue. Pass Jira REST fields payload.", http.MethodPost, base + "/rest/api/2/issue", h, map[string]any{"type": "object"}},
+		HTTPTool{"jira_add_comment", "Add a comment to a Jira issue. Args: issueKey, body (plain text).", http.MethodPost, base + "/rest/api/2/issue/{issueKey}/comment", h, map[string]any{"type": "object", "properties": map[string]any{"issueKey": map[string]any{"type": "string"}, "body": map[string]any{"type": "string"}}, "required": []string{"issueKey", "body"}}},
+	}
+}
+
+func ConfluenceTools(base, email, token string) []Tool {
+	h := AtlassianAuth(email, token)
+	base = apiBase(base)
+	return []Tool{
+		HTTPTool{"confluence_search", "Search Confluence CQL", http.MethodGet, base + "/rest/api/content/search", h, map[string]any{"type": "object", "properties": map[string]any{"cql": map[string]any{"type": "string"}}}},
+		HTTPTool{"confluence_get_page", "Get Confluence page by id. Expand body.", http.MethodGet, base + "/rest/api/content/{id}?expand=body.storage,version", h, map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string"}}, "required": []string{"id"}}},
+		confluenceWriteTool{kind: "comment", base: base, email: email, token: token},
+		confluenceWriteTool{kind: "page", base: base, email: email, token: token},
+	}
+}
+
+type confluenceWriteTool struct {
+	kind, base, email, token string
+}
+
+func (t confluenceWriteTool) Name() string {
+	if t.kind == "comment" {
+		return "confluence_add_comment"
+	}
+	return "confluence_update_page"
+}
+
+func (t confluenceWriteTool) Description() string {
+	if t.kind == "comment" {
+		return "Add a footer comment to a Confluence page. Args: id (page id or URL), body (text or HTML)."
+	}
+	return "Write a Kaiban section onto a Confluence page body (does not wipe the rest of the page). Args: id (page id or URL), heading, body."
+}
+
+func (t confluenceWriteTool) Parameters() map[string]any {
+	props := map[string]any{
+		"id":   map[string]any{"type": "string"},
+		"body": map[string]any{"type": "string"},
+	}
+	req := []string{"id", "body"}
+	if t.kind != "comment" {
+		props["heading"] = map[string]any{"type": "string"}
+	}
+	return map[string]any{"type": "object", "properties": props, "required": req}
+}
+
+func (t confluenceWriteTool) Call(ctx context.Context, args string) (string, error) {
+	var p confluenceWriteArgs
+	if err := json.Unmarshal([]byte(args), &p); err != nil {
+		return "", errors.Wrap(err, "decode confluence tool args")
+	}
+	if t.kind == "comment" {
+		htmlBody := "<pre>" + html.EscapeString(p.Body) + "</pre>"
+		return PostConfluenceComment(ctx, t.base, t.email, t.token, p.ID, htmlBody)
+	}
+	if p.Heading == "" {
+		p.Heading = "Kaiban"
+	}
+	return AppendConfluencePage(ctx, t.base, t.email, t.token, p.ID, "kaiban:agent", p.Heading, p.Body)
 }
 
 func PostJiraComment(ctx context.Context, base, email, token, issue, text string) (string, error) {
@@ -83,7 +167,7 @@ func FetchConfluencePage(ctx context.Context, base, email, token, pageRef string
 		return "", errors.Wrap(err, "decode confluence page")
 	}
 	text := parsed.Title + "\n" + parsed.Body.Storage.Value
-	return truncate(text, 12000), nil
+	return textutil.TruncateRunes(text, maxPageChars), nil
 }
 
 func PostConfluenceComment(ctx context.Context, base, email, token, pageRef, htmlBody string) (string, error) {
@@ -115,6 +199,7 @@ func PostConfluenceComment(ctx context.Context, base, email, token, pageRef, htm
 	return out, nil
 }
 
+// MergeConfluenceSection replaces the marked block or appends it, keeping the rest of the page.
 func MergeConfluenceSection(existing, marker, innerHTML string) string {
 	start := "<!-- " + marker + " -->"
 	end := "<!-- /" + marker + " -->"
@@ -150,7 +235,7 @@ func AppendConfluencePage(ctx context.Context, base, email, token, pageRef, mark
 	if page.Type == "" {
 		page.Type = "page"
 	}
-	inner := "<h2>" + html.EscapeString(heading) + "</h2><pre>" + html.EscapeString(truncate(report, 12000)) + "</pre>"
+	inner := "<h2>" + html.EscapeString(heading) + "</h2><pre>" + html.EscapeString(textutil.TruncateRunes(report, maxPageChars)) + "</pre>"
 	newBody := MergeConfluenceSection(page.Body.Storage.Value, marker, inner)
 	put := map[string]any{
 		"id":      page.ID,
@@ -175,107 +260,6 @@ func AppendConfluencePage(ctx context.Context, base, email, token, pageRef, mark
 	out, err := doJSON(ctx, http.MethodPut, putURL, AtlassianAuth(email, token), payload)
 	if err != nil {
 		return "", errors.Wrap(err, "update confluence page")
-	}
-	return out, nil
-}
-
-func EnsureGitLabMR(ctx context.Context, base, token, projectRef, source, target, title, description string) (string, error) {
-	project, err := ParseGitLabProject(projectRef)
-	if err != nil {
-		return "", errors.Wrap(err, "parse gitlab project")
-	}
-	id := url.QueryEscape(project)
-	api := apiBase(base) + "/api/v4"
-	h := GitLabAuth(token)
-	if target == "" {
-		raw, err := doJSON(ctx, http.MethodGet, api+"/projects/"+id, h, nil)
-		if err == nil {
-			var p gitlabProjectMeta
-			if uerr := json.Unmarshal([]byte(stripStatus(raw)), &p); uerr == nil && p.DefaultBranch != "" {
-				target = p.DefaultBranch
-			}
-		}
-		if target == "" {
-			target = "main"
-		}
-	}
-	body, err := marshalJSON(map[string]any{
-		"source_branch": source,
-		"target_branch": target,
-		"title":         title,
-		"description":   description,
-	}, "gitlab mr")
-	if err != nil {
-		return "", err
-	}
-	out, err := doJSON(ctx, http.MethodPost, api+"/projects/"+id+"/merge_requests", h, body)
-	if err != nil {
-		return "", errors.Wrap(err, "create gitlab mr")
-	}
-	return out, nil
-}
-
-func PushTaskBranch(ctx context.Context, workDir, repo, token, branch string) error {
-	return pushTaskBranchAs(ctx, workDir, repo, token, branch, "oauth2")
-}
-
-func PushTaskBranchGitHub(ctx context.Context, workDir, repo, token, branch string) error {
-	return pushTaskBranchAs(ctx, workDir, repo, token, branch, "x-access-token")
-}
-
-func pushTaskBranchAs(ctx context.Context, workDir, repo, token, branch, user string) error {
-	if repo == "" || branch == "" {
-		return errors.New("git repo or branch is empty")
-	}
-	remote := AuthenticatedGitURLAs(repo, token, user)
-	dir := filepath.Join(workDir, branch)
-	if err := ensureRepo(ctx, remote, dir, branch); err != nil {
-		return errors.Wrap(err, "ensure git repo")
-	}
-	_ = exec.CommandContext(ctx, "git", "-C", dir, "remote", "set-url", "origin", remote).Run()
-	cmd := exec.CommandContext(ctx, "git", "-C", dir, "push", "-u", "origin", branch)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return errors.Wrapf(err, "git push: %s", out)
-	}
-	return nil
-}
-
-func stripStatus(s string) string {
-	if i := strings.Index(s, " body="); i >= 0 {
-		return s[i+6:]
-	}
-	return s
-}
-
-func doJSON(ctx context.Context, method, rawURL string, headers map[string]string, body []byte) (string, error) {
-	var rdr io.Reader
-	if body != nil {
-		rdr = bytes.NewReader(body)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, rawURL, rdr)
-	if err != nil {
-		return "", errors.Wrap(err, "build http request")
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	client := &http.Client{Timeout: 45 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", errors.Wrap(err, "http request")
-	}
-	defer func() { _ = resp.Body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 32*1024))
-	if err != nil {
-		return "", errors.Wrap(err, "read http body")
-	}
-	out := fmt.Sprintf("status=%d body=%s", resp.StatusCode, string(data))
-	if resp.StatusCode >= 300 {
-		return out, errors.Errorf("http %d: %s", resp.StatusCode, string(data))
 	}
 	return out, nil
 }

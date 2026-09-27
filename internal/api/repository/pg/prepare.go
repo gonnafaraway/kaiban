@@ -75,7 +75,7 @@ func (r taskRepo) Update(ctx context.Context, t *task.Task) error { return r.s.U
 func (r taskRepo) AddReport(ctx context.Context, taskID, columnID uuid.UUID, report string) error {
 	return r.s.AddReport(ctx, taskID, columnID, report)
 }
-func (r taskRepo) ListReports(ctx context.Context, taskID uuid.UUID) ([]repository.Report, error) {
+func (r taskRepo) ListReports(ctx context.Context, taskID uuid.UUID) ([]task.Report, error) {
 	return r.s.ListReports(ctx, taskID)
 }
 

@@ -1,16 +1,17 @@
-package kanban
+package config
 
 import (
 	"context"
-	"strings"
 
 	"github.com/pkg/errors"
 
+	"kaiban/internal/api/domain/secret"
 	"kaiban/internal/api/domain/settings"
-	"kaiban/internal/api/integration"
+	"kaiban/internal/api/integration/llm"
+	"kaiban/internal/api/llmprovider"
 )
 
-func (u *UseCase) GetSettings(ctx context.Context) (*settings.Settings, error) {
+func (u *Manager) GetSettings(ctx context.Context) (*settings.Settings, error) {
 	st, err := u.Repo.Settings.Get(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "get settings")
@@ -18,7 +19,7 @@ func (u *UseCase) GetSettings(ctx context.Context) (*settings.Settings, error) {
 	return st, nil
 }
 
-func (u *UseCase) UpdateSettings(ctx context.Context, in *settings.Settings) (*settings.Settings, error) {
+func (u *Manager) UpdateSettings(ctx context.Context, in *settings.Settings) (*settings.Settings, error) {
 	cur, err := u.Repo.Settings.Get(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "get settings")
@@ -32,7 +33,9 @@ func (u *UseCase) UpdateSettings(ctx context.Context, in *settings.Settings) (*s
 			cur.LLMProvider = settings.InferProviderFromURL(in.LLMBaseURL)
 		}
 	}
-	if in.LLMAPIKey != "" && !strings.Contains(in.LLMAPIKey, "*") {
+	// The API returns the key masked, so an empty value or the mask echoed back
+	// means "keep the stored key".
+	if in.LLMAPIKey != "" && in.LLMAPIKey != secret.Mask(cur.LLMAPIKey) {
 		cur.LLMAPIKey = in.LLMAPIKey
 	}
 	if in.LLMModel != "" {
@@ -85,10 +88,10 @@ type LLMModelOption struct {
 }
 
 // ListLLMModels returns models for a provider preset.
-func (u *UseCase) ListLLMModels(provider string) []LLMModelOption {
+func (u *Manager) ListLLMModels(provider string) []LLMModelOption {
 	switch settings.NormalizeProvider(provider) {
 	case settings.ProviderOpenCode:
-		ids := settings.OpenCodeChatModels()
+		ids := llmprovider.OpenCodeChatModels()
 		out := make([]LLMModelOption, 0, len(ids))
 		for _, id := range ids {
 			out = append(out, LLMModelOption{ID: id, Name: id})
@@ -110,7 +113,7 @@ type TestLLMResult struct {
 }
 
 // TestLLM sends a tiny chat request using current settings (or optional overrides).
-func (u *UseCase) TestLLM(ctx context.Context, override *settings.Settings) (*TestLLMResult, error) {
+func (u *Manager) TestLLM(ctx context.Context, override *settings.Settings) (*TestLLMResult, error) {
 	st, err := u.Repo.Settings.Get(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "get settings")
@@ -122,7 +125,7 @@ func (u *UseCase) TestLLM(ctx context.Context, override *settings.Settings) (*Te
 		if override.LLMBaseURL != "" {
 			st.LLMBaseURL = override.LLMBaseURL
 		}
-		if override.LLMAPIKey != "" && !strings.Contains(override.LLMAPIKey, "*") {
+		if override.LLMAPIKey != "" && override.LLMAPIKey != secret.Mask(st.LLMAPIKey) {
 			st.LLMAPIKey = override.LLMAPIKey
 		}
 		if override.LLMModel != "" {
@@ -135,7 +138,7 @@ func (u *UseCase) TestLLM(ctx context.Context, override *settings.Settings) (*Te
 	if u.LLM == nil {
 		return &TestLLMResult{OK: false, Provider: st.LLMProvider, Model: st.LLMModel, BaseURL: st.LLMBaseURL, Error: "llm client not configured"}, nil
 	}
-	msg, err := u.LLM.Chat(ctx, st.LLMBaseURL, st.LLMAPIKey, st.LLMModel, []integration.ChatMessage{
+	msg, err := u.LLM.Chat(ctx, st.LLMBaseURL, st.LLMAPIKey, st.LLMModel, []llm.ChatMessage{
 		{Role: "user", Content: "Reply with exactly the word OK and nothing else."},
 	}, nil)
 	if err != nil {

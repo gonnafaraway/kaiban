@@ -213,7 +213,7 @@ kaiban/
 | `OPENAI_API_KEY` | LLM credentials |
 | `OPENAI_API_BASE` | OpenAI-compatible base URL |
 | `OPENAI_MODEL` | Default model id |
-| `LLM_HTTP_TIMEOUT` | Long-run agent HTTP timeout (default `10m`) |
+| `LLM_HTTP_TIMEOUT` | Long-run agent HTTP timeout (default `120s`) |
 | `DATABASE_URL` | Postgres DSN (compose overrides for the `api` service) |
 | `GIT_WORK_DIR` | Workspace for git operations inside the API |
 | `JIRA_*` / `CONFLUENCE_*` / `GITLAB_*` / `GITHUB_*` | Optional seed for integrations (`GITHUB_URL` defaults to `https://api.github.com`) |

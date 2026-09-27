@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"kaiban/internal/api/domain/secret"
 )
 
 type Type string
@@ -38,17 +40,7 @@ type Integration struct {
 func (i *Integration) MaskedCredentials() map[string]string {
 	out := map[string]string{}
 	for k, v := range i.Credentials {
-		out[k] = mask(v)
+		out[k] = secret.Mask(v)
 	}
 	return out
-}
-
-func mask(v string) string {
-	if len(v) <= 4 {
-		if v == "" {
-			return ""
-		}
-		return "****"
-	}
-	return "****" + v[len(v)-4:]
 }

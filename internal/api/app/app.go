@@ -6,7 +6,7 @@ import (
 	"kaiban/internal/api/env"
 	"kaiban/internal/api/handlers"
 	"kaiban/internal/api/infrastructure/local/log"
-	"kaiban/internal/api/integration"
+	"kaiban/internal/api/integration/llm"
 	"kaiban/internal/api/repository/pg"
 	"kaiban/internal/api/service"
 	"kaiban/internal/api/storage"
@@ -30,11 +30,11 @@ func Run() error {
 	}
 	repo := pg.PrepareRepository(storages)
 	hub := httptransport.NewHub()
-	uc := kanban.Prepare(repo, integration.NewOpenAI(), e.GitWorkDir, hub)
+	uc := kanban.Prepare(repo, llm.NewOpenAI(e.LLMHTTPTimeout), e.GitWorkDir, hub)
 	fiberApp := httptransport.NewApp(logger)
 	handlers.Register(fiberApp, handlers.Deps{UC: uc, Hub: hub})
 
 	apiSvc := service.PrepareAPIService(e.HTTPAddr, fiberApp, logger)
-	jobsSvc := service.PrepareJobsService(repo, uc, e.WorkerN, logger)
+	jobsSvc := service.PrepareJobsService(uc, e.WorkerN, logger)
 	return service.RunServices(apiSvc, jobsSvc)
 }

@@ -3,7 +3,6 @@ package integration
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -19,6 +18,39 @@ type GitHubClient struct {
 
 type githubRepoMeta struct {
 	DefaultBranch string `json:"default_branch"`
+}
+
+func GitHubAuth(token string) map[string]string {
+	return map[string]string{
+		"Authorization":        "Bearer " + token,
+		"Accept":               "application/vnd.github+json",
+		"X-GitHub-Api-Version": "2022-11-28",
+	}
+}
+
+func GitHubTools(base, token string) []Tool {
+	c := NewGitHubClient(base, token)
+	h := c.headers()
+	api := c.BaseURL
+	return []Tool{
+		HTTPTool{"github_get_repo", "Get GitHub repository. Args: owner, repo.", http.MethodGet, api + "/repos/{owner}/{repo}", h, map[string]any{"type": "object", "properties": map[string]any{
+			"owner": map[string]any{"type": "string"},
+			"repo":  map[string]any{"type": "string"},
+		}, "required": []string{"owner", "repo"}}},
+		HTTPTool{"github_list_prs", "List pull requests. Args: owner, repo, optional state (open|closed|all).", http.MethodGet, api + "/repos/{owner}/{repo}/pulls", h, map[string]any{"type": "object", "properties": map[string]any{
+			"owner": map[string]any{"type": "string"},
+			"repo":  map[string]any{"type": "string"},
+			"state": map[string]any{"type": "string"},
+		}, "required": []string{"owner", "repo"}}},
+		HTTPTool{"github_create_pr", "Create a pull request. Args: owner, repo, title, head (source branch), base (target branch), body.", http.MethodPost, api + "/repos/{owner}/{repo}/pulls", h, map[string]any{"type": "object", "properties": map[string]any{
+			"owner": map[string]any{"type": "string"},
+			"repo":  map[string]any{"type": "string"},
+			"title": map[string]any{"type": "string"},
+			"head":  map[string]any{"type": "string"},
+			"base":  map[string]any{"type": "string"},
+			"body":  map[string]any{"type": "string"},
+		}, "required": []string{"owner", "repo", "title", "head"}}},
+	}
 }
 
 func NewGitHubClient(baseURL, token string) *GitHubClient {
@@ -95,7 +127,7 @@ func (c *GitHubClient) EnsurePR(ctx context.Context, projectRef, source, target,
 	}
 	parts := strings.SplitN(path, "/", 2)
 	if len(parts) != 2 {
-		return "", fmt.Errorf("invalid github repo path %q", path)
+		return "", errors.Errorf("invalid github repo path %q", path)
 	}
 	owner, repo := parts[0], parts[1]
 	if target == "" {

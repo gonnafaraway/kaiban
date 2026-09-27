@@ -9,7 +9,7 @@ import (
 	"kaiban/internal/api/integration"
 )
 
-func (u *UseCase) TaskDiff(ctx context.Context, id uuid.UUID) (map[string]any, error) {
+func (u *Board) TaskDiff(ctx context.Context, id uuid.UUID) (map[string]any, error) {
 	t, err := u.Repo.Tasks.Get(ctx, id)
 	if err != nil {
 		return nil, errors.Wrap(err, "get task")
@@ -18,11 +18,16 @@ func (u *UseCase) TaskDiff(ctx context.Context, id uuid.UUID) (map[string]any, e
 	if err != nil {
 		return nil, errors.Wrap(err, "get settings")
 	}
-	repoURL, _, _ := u.resolveGitRemote(ctx, st, t.ContextData.Artifacts)
-	_ = integration.RefreshTaskWorktree(ctx, u.GitWorkDir, repoURL, t.GitBranch, st.GitDefaultBranch)
+	repoURL, _, _ := u.ResolveGitRemote(ctx, st, t.ContextData.Artifacts)
+	refreshErr := integration.RefreshTaskWorktree(ctx, u.GitWorkDir, repoURL, t.GitBranch, st.GitDefaultBranch)
 	sum, diffErr := integration.TaskDiffSummary(ctx, u.GitWorkDir, t.GitBranch, st.GitDefaultBranch)
 	if diffErr != nil || sum == nil {
 		sum = &integration.DiffSummary{Base: st.GitDefaultBranch, Branch: t.GitBranch, Empty: true, Files: []integration.DiffFile{}, Commits: []string{}}
+	}
+	// The diff still renders from the local worktree; a refresh failure only
+	// means it may be stale, so report it instead of failing the request.
+	if diffErr == nil && refreshErr != nil {
+		diffErr = errors.Wrap(refreshErr, "refresh worktree")
 	}
 	return map[string]any{
 		"base":        sum.Base,
@@ -39,7 +44,7 @@ func (u *UseCase) TaskDiff(ctx context.Context, id uuid.UUID) (map[string]any, e
 	}, nil
 }
 
-func (u *UseCase) TaskDiffRaw(ctx context.Context, id uuid.UUID) (string, error) {
+func (u *Board) TaskDiffRaw(ctx context.Context, id uuid.UUID) (string, error) {
 	t, err := u.Repo.Tasks.Get(ctx, id)
 	if err != nil {
 		return "", errors.Wrap(err, "get task")
@@ -48,9 +53,16 @@ func (u *UseCase) TaskDiffRaw(ctx context.Context, id uuid.UUID) (string, error)
 	if err != nil {
 		return "", errors.Wrap(err, "get settings")
 	}
-	repoURL, _, _ := u.resolveGitRemote(ctx, st, t.ContextData.Artifacts)
-	_ = integration.RefreshTaskWorktree(ctx, u.GitWorkDir, repoURL, t.GitBranch, st.GitDefaultBranch)
-	return integration.TaskDiffUnified(ctx, u.GitWorkDir, t.GitBranch, st.GitDefaultBranch, 200*1024)
+	repoURL, _, _ := u.ResolveGitRemote(ctx, st, t.ContextData.Artifacts)
+	refreshErr := integration.RefreshTaskWorktree(ctx, u.GitWorkDir, repoURL, t.GitBranch, st.GitDefaultBranch)
+	raw, err := integration.TaskDiffUnified(ctx, u.GitWorkDir, t.GitBranch, st.GitDefaultBranch, 200*1024)
+	if err != nil {
+		if refreshErr != nil {
+			return "", errors.Wrapf(err, "task diff unified (worktree refresh failed: %v)", refreshErr)
+		}
+		return "", errors.Wrap(err, "task diff unified")
+	}
+	return raw, nil
 }
 
 func errString(err error) string {

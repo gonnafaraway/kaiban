@@ -11,7 +11,7 @@ import (
 	"kaiban/internal/api/domain/column"
 )
 
-func (u *UseCase) ListColumns(ctx context.Context) ([]*column.Column, error) {
+func (u *Board) ListColumns(ctx context.Context) ([]*column.Column, error) {
 	cols, err := u.Repo.Columns.List(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "list columns")
@@ -19,7 +19,7 @@ func (u *UseCase) ListColumns(ctx context.Context) ([]*column.Column, error) {
 	return cols, nil
 }
 
-func (u *UseCase) CreateColumn(ctx context.Context, name, prompt string, order int) (*column.Column, error) {
+func (u *Board) CreateColumn(ctx context.Context, name, prompt string, order int) (*column.Column, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, column.ErrNameRequired
@@ -37,7 +37,7 @@ func (u *UseCase) CreateColumn(ctx context.Context, name, prompt string, order i
 	return c, nil
 }
 
-func (u *UseCase) PatchColumn(ctx context.Context, id uuid.UUID, name, template, overlay *string, nameI18n map[string]string, fields *[]column.OutputField, budget *column.BudgetLimits, requiresGitDiff *bool) (*column.Column, error) {
+func (u *Board) PatchColumn(ctx context.Context, id uuid.UUID, name, template, overlay *string, nameI18n map[string]string, fields *[]column.OutputField, budget *column.BudgetLimits, requiresGitDiff *bool) (*column.Column, error) {
 	c, err := u.Repo.Columns.Get(ctx, id)
 	if err != nil {
 		return nil, errors.Wrap(err, "get column")
@@ -86,7 +86,7 @@ func (u *UseCase) PatchColumn(ctx context.Context, id uuid.UUID, name, template,
 	return c, nil
 }
 
-func (u *UseCase) ResetOverlay(ctx context.Context, id uuid.UUID) (*column.Column, error) {
+func (u *Board) ResetOverlay(ctx context.Context, id uuid.UUID) (*column.Column, error) {
 	c, err := u.Repo.Columns.Get(ctx, id)
 	if err != nil {
 		return nil, errors.Wrap(err, "get column")
@@ -98,7 +98,7 @@ func (u *UseCase) ResetOverlay(ctx context.Context, id uuid.UUID) (*column.Colum
 	return c, nil
 }
 
-func (u *UseCase) RestoreDefault(ctx context.Context, id uuid.UUID) (*column.Column, error) {
+func (u *Board) RestoreDefault(ctx context.Context, id uuid.UUID) (*column.Column, error) {
 	c, err := u.Repo.Columns.Get(ctx, id)
 	if err != nil {
 		return nil, errors.Wrap(err, "get column")
@@ -110,7 +110,7 @@ func (u *UseCase) RestoreDefault(ctx context.Context, id uuid.UUID) (*column.Col
 	return c, nil
 }
 
-func (u *UseCase) DeleteColumn(ctx context.Context, id uuid.UUID) error {
+func (u *Board) DeleteColumn(ctx context.Context, id uuid.UUID) error {
 	n, err := u.Repo.Columns.CountTasks(ctx, id)
 	if err != nil {
 		return errors.Wrap(err, "count column tasks")
@@ -131,7 +131,7 @@ func (u *UseCase) DeleteColumn(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (u *UseCase) ReorderColumns(ctx context.Context, ids []uuid.UUID) error {
+func (u *Board) ReorderColumns(ctx context.Context, ids []uuid.UUID) error {
 	if err := u.Repo.Columns.Reorder(ctx, ids); err != nil {
 		return errors.Wrap(err, "reorder columns")
 	}

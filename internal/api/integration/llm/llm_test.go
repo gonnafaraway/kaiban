@@ -1,4 +1,4 @@
-package integration
+package llm
 
 import (
 	"strings"
@@ -40,12 +40,8 @@ func TestParseChatStream_toolCalls(t *testing.T) {
 	}
 }
 
-func TestTruncateRunes(t *testing.T) {
-	got := truncate("абвгде", 3)
-	if got != "абв..." {
-		t.Fatalf("got %q", got)
-	}
-	if truncate("short", 10) != "short" {
-		t.Fatal("short unchanged")
+func TestNewOpenAIFallsBackToDefaultTimeout(t *testing.T) {
+	if got := NewOpenAI(0).HTTP.Timeout; got != DefaultTimeout {
+		t.Fatalf("timeout %s", got)
 	}
 }

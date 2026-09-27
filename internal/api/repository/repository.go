@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +17,10 @@ import (
 	"kaiban/internal/api/domain/task"
 	"kaiban/internal/api/domain/user"
 )
+
+// ErrNotFound is returned when a requested row does not exist. Storage drivers
+// must map their own "no rows" errors to it.
+var ErrNotFound = errors.New("not found")
 
 type ColumnRepository interface {
 	List(ctx context.Context) ([]*column.Column, error)
@@ -36,13 +41,7 @@ type TaskRepository interface {
 	Create(ctx context.Context, t *task.Task) error
 	Update(ctx context.Context, t *task.Task) error
 	AddReport(ctx context.Context, taskID, columnID uuid.UUID, report string) error
-	ListReports(ctx context.Context, taskID uuid.UUID) ([]Report, error)
-}
-
-type Report struct {
-	ColumnID  uuid.UUID `json:"column_id"`
-	ReportMD  string    `json:"report_md"`
-	CreatedAt time.Time `json:"created_at"`
+	ListReports(ctx context.Context, taskID uuid.UUID) ([]task.Report, error)
 }
 
 type UserRepository interface {

@@ -30,7 +30,7 @@ func (h *Hub) Unsubscribe(ch chan []byte) {
 }
 
 func (h *Hub) Publish(event string, payload any) {
-	body, err := json.Marshal(map[string]any{"event": event, "payload": payload})
+	body, err := json.Marshal(map[string]any{FieldEvent: event, FieldPayload: payload})
 	if err != nil {
 		return
 	}

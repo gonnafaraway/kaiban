@@ -1,25 +1,25 @@
-package kanban
+package config
 
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/pkg/errors"
 
 	"kaiban/internal/api/domain/column"
 	domint "kaiban/internal/api/domain/integration"
 	"kaiban/internal/api/domain/mcpserver"
+	"kaiban/internal/api/domain/secret"
 	"kaiban/internal/api/domain/settings"
+	"kaiban/internal/api/repository"
 )
 
-const configBundleVersion = 1
+const bundleVersion = 1
 
-// ConfigBundle is a portable full-app settings snapshot (no tasks / runs / jobs).
-type ConfigBundle struct {
+// Bundle is a portable full-app settings snapshot (no tasks / runs / jobs).
+type Bundle struct {
 	Version      int                   `json:"version"`
 	ExportedAt   time.Time             `json:"exported_at"`
 	Settings     *settings.Settings    `json:"settings"`
@@ -72,7 +72,7 @@ type ImportResult struct {
 	ReplacedColumns      bool   `json:"replaced_columns"`
 }
 
-func (u *UseCase) ExportConfig(ctx context.Context) (*ConfigBundle, error) {
+func (u *Manager) ExportConfig(ctx context.Context) (*Bundle, error) {
 	st, err := u.Repo.Settings.Get(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "get settings")
@@ -90,8 +90,8 @@ func (u *UseCase) ExportConfig(ctx context.Context) (*ConfigBundle, error) {
 		return nil, errors.Wrap(err, "list columns")
 	}
 
-	out := &ConfigBundle{
-		Version:      configBundleVersion,
+	out := &Bundle{
+		Version:      bundleVersion,
 		ExportedAt:   time.Now().UTC(),
 		Settings:     st,
 		Integrations: make([]ExportedIntegration, 0, len(ints)),
@@ -141,11 +141,11 @@ func (u *UseCase) ExportConfig(ctx context.Context) (*ConfigBundle, error) {
 	return out, nil
 }
 
-func (u *UseCase) ImportConfig(ctx context.Context, in *ConfigBundle) (*ImportResult, error) {
+func (u *Manager) ImportConfig(ctx context.Context, in *Bundle) (*ImportResult, error) {
 	if in == nil {
 		return nil, errors.New("empty config")
 	}
-	if in.Version != 0 && in.Version != configBundleVersion {
+	if in.Version != 0 && in.Version != bundleVersion {
 		return nil, fmt.Errorf("unsupported config version %d", in.Version)
 	}
 
@@ -185,7 +185,7 @@ func (u *UseCase) ImportConfig(ctx context.Context, in *ConfigBundle) (*ImportRe
 	}
 	return &ImportResult{
 		Mode:                 "replace_all",
-		Version:              configBundleVersion,
+		Version:              bundleVersion,
 		SettingsUpdated:      settingsUpdated,
 		Integrations:         len(bundle.Integrations),
 		MCPServers:           len(bundle.MCPServers),
@@ -196,7 +196,7 @@ func (u *UseCase) ImportConfig(ctx context.Context, in *ConfigBundle) (*ImportRe
 	}, nil
 }
 
-func (u *UseCase) replaceIntegrations(ctx context.Context, items []ExportedIntegration) error {
+func (u *Manager) replaceIntegrations(ctx context.Context, items []ExportedIntegration) error {
 	existing, err := u.Repo.Integrations.List(ctx)
 	if err != nil {
 		return errors.Wrap(err, "list integrations")
@@ -232,7 +232,7 @@ func (u *UseCase) replaceIntegrations(ctx context.Context, items []ExportedInteg
 	return nil
 }
 
-func (u *UseCase) replaceMCP(ctx context.Context, items []ExportedMCPServer) error {
+func (u *Manager) replaceMCP(ctx context.Context, items []ExportedMCPServer) error {
 	existing, err := u.Repo.MCP.List(ctx)
 	if err != nil {
 		return errors.Wrap(err, "list mcp servers")
@@ -278,7 +278,7 @@ func (u *UseCase) replaceMCP(ctx context.Context, items []ExportedMCPServer) err
 	return nil
 }
 
-func (u *UseCase) replaceColumns(ctx context.Context, items []ExportedColumn) error {
+func (u *Manager) replaceColumns(ctx context.Context, items []ExportedColumn) error {
 	existing, err := u.Repo.Columns.List(ctx)
 	if err != nil {
 		return errors.Wrap(err, "list columns")
@@ -329,8 +329,8 @@ func (u *UseCase) replaceColumns(ctx context.Context, items []ExportedColumn) er
 
 		cur, getErr := u.Repo.Columns.Get(ctx, id)
 		if getErr != nil {
-			if !errors.Is(getErr, pgx.ErrNoRows) {
-				return getErr
+			if !errors.Is(getErr, repository.ErrNotFound) {
+				return errors.Wrap(getErr, "get column")
 			}
 			c := &column.Column{
 				ID: id, Name: name, NameI18n: nameI18n,
@@ -377,10 +377,12 @@ func (u *UseCase) replaceColumns(ctx context.Context, items []ExportedColumn) er
 	return nil
 }
 
+// scrubSecretMap drops credentials that arrived masked: an imported bundle can
+// only carry real secrets, never the placeholders the API hands out.
 func scrubSecretMap(in map[string]string) map[string]string {
 	out := map[string]string{}
 	for k, v := range in {
-		if strings.Contains(v, "*") {
+		if secret.IsMasked(v) {
 			continue
 		}
 		out[k] = v

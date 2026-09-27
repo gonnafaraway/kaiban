@@ -9,13 +9,13 @@ import (
 
 	"kaiban/internal/api/domain/column"
 	"kaiban/internal/api/domain/task"
+	"kaiban/internal/api/repository"
 	httptransport "kaiban/internal/api/transport/http"
 )
 
 var (
 	ErrInvalidID   = stdliberrors.New("invalid id")
 	ErrInvalidBody = stdliberrors.New("invalid request body")
-	ErrNotFound    = stdliberrors.New("not found")
 )
 
 func parseID(c *fiber.Ctx) (uuid.UUID, error) {
@@ -51,12 +51,12 @@ func respondError(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, ErrInvalidID), errors.Is(err, ErrInvalidBody):
 		return httptransport.JSONError(c, 400, "bad_request", err.Error())
-	case errors.Is(err, ErrNotFound):
+	case errors.Is(err, repository.ErrNotFound):
 		return httptransport.JSONError(c, 404, "not_found", err.Error())
 	case errors.Is(err, task.ErrTitleRequired), errors.Is(err, task.ErrCommentRequired),
 		errors.Is(err, task.ErrReturnTarget), errors.Is(err, task.ErrInvalidTransition),
 		errors.Is(err, task.ErrNotArchived), errors.Is(err, task.ErrContractInvalid),
-		errors.Is(err, task.ErrGitDiffRequired):
+		errors.Is(err, task.ErrGitDiffRequired), errors.Is(err, task.ErrBudgetExceeded):
 		return httptransport.JSONError(c, 400, "bad_request", err.Error())
 	case errors.Is(err, task.ErrAlreadyRunning), errors.Is(err, task.ErrNotSucceeded),
 		errors.Is(err, task.ErrForwardMove), errors.Is(err, task.ErrArchived),
@@ -67,15 +67,5 @@ func respondError(c *fiber.Ctx, err error) error {
 		return httptransport.JSONError(c, 400, "bad_request", err.Error())
 	default:
 		return httptransport.JSONError(c, 500, "internal", err.Error())
-	}
-}
-
-func taskPayload(t *task.Task, reports any) fiber.Map {
-	return fiber.Map{
-		"id": t.ID, "title": t.Title, "description": t.Description, "variables": t.Variables,
-		"column_id": t.ColumnID, "execution_status": t.ExecutionStatus, "git_branch": t.GitBranch,
-		"git_pr_url": t.GitPRURL, "git_push_status": t.GitPushStatus, "git_pr_status": t.GitPRStatus,
-		"current_report": t.CurrentReport, "context_data": t.ContextData, "created_by": t.CreatedBy,
-		"created_at": t.CreatedAt, "updated_at": t.UpdatedAt, "archived_at": t.ArchivedAt, "reports": reports,
 	}
 }

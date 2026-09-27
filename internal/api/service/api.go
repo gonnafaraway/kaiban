@@ -8,7 +8,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	"kaiban/internal/api/domain/job"
-	"kaiban/internal/api/repository"
 	"kaiban/internal/api/usecase/kanban"
 )
 
@@ -28,17 +27,16 @@ func (s *APIService) Run() error {
 }
 
 type JobsService struct {
-	repo *repository.Repository
-	uc   *kanban.UseCase
-	n    int
-	log  *slog.Logger
+	uc  *kanban.UseCase
+	n   int
+	log *slog.Logger
 }
 
-func PrepareJobsService(repo *repository.Repository, uc *kanban.UseCase, n int, log *slog.Logger) *JobsService {
+func PrepareJobsService(uc *kanban.UseCase, n int, log *slog.Logger) *JobsService {
 	if n < 1 {
 		n = 1
 	}
-	return &JobsService{repo: repo, uc: uc, n: n, log: log}
+	return &JobsService{uc: uc, n: n, log: log}
 }
 
 const (
@@ -57,7 +55,7 @@ func (s *JobsService) Run() error {
 		if free <= 0 {
 			continue
 		}
-		jobs, err := s.repo.Jobs.Lease(ctx, free, jobLease)
+		jobs, err := s.uc.LeaseJobs(ctx, free, jobLease)
 		if err != nil {
 			s.log.Error("lease", "error", err)
 			continue
@@ -86,7 +84,7 @@ func (s *JobsService) handle(j *job.Job) {
 			case <-done:
 				return
 			case <-t.C:
-				if err := s.repo.Jobs.RenewLease(context.Background(), j.ID, jobLease); err != nil {
+				if err := s.uc.RenewJobLease(context.Background(), j.ID, jobLease); err != nil {
 					s.log.Warn("renew lease", "error", err, "job", j.ID.String())
 				}
 			}
@@ -103,7 +101,7 @@ func (s *JobsService) handle(j *job.Job) {
 		msg = err.Error()
 		s.log.Error("job", "error", err, "job", j.ID.String())
 	}
-	if err := s.repo.Jobs.Complete(context.Background(), j.ID, st, msg); err != nil {
+	if err := s.uc.CompleteJob(context.Background(), j.ID, st, msg); err != nil {
 		s.log.Error("complete job", "error", err, "job", j.ID.String())
 	}
 }

@@ -37,7 +37,7 @@ type returnTaskBody struct {
 func (d Deps) listTasks(c *fiber.Ctx) error {
 	items, err := d.UC.ListTasks(c.Context())
 	if err != nil {
-		return respondError(c, errors.Wrap(err, "list tasks"))
+		return respondError(c, err)
 	}
 	if items == nil {
 		items = []*task.Task{}
@@ -48,9 +48,9 @@ func (d Deps) listTasks(c *fiber.Ctx) error {
 func (d Deps) listArchive(c *fiber.Ctx) error {
 	items, err := d.UC.ListArchived(c.Context())
 	if err != nil {
-		return respondError(c, errors.Wrap(err, "list archive"))
+		return respondError(c, err)
 	}
-	out := make([]fiber.Map, 0, len(items))
+	out := make([]taskResponse, 0, len(items))
 	for _, item := range items {
 		out = append(out, taskPayload(item.Task, item.Reports))
 	}
@@ -64,7 +64,7 @@ func (d Deps) createTask(c *fiber.Ctx) error {
 	}
 	t, err := d.UC.CreateTask(c.Context(), body.Title, body.Description, body.Variables, body.Artifacts)
 	if err != nil {
-		return respondError(c, errors.Wrap(err, "create task"))
+		return respondError(c, err)
 	}
 	return c.Status(201).JSON(t)
 }
@@ -76,7 +76,7 @@ func (d Deps) getTask(c *fiber.Ctx) error {
 	}
 	t, reports, err := d.UC.GetTask(c.Context(), id)
 	if err != nil {
-		return respondError(c, errors.Wrap(ErrNotFound, err.Error()))
+		return respondError(c, err)
 	}
 	return c.JSON(taskPayload(t, reports))
 }
@@ -88,7 +88,7 @@ func (d Deps) taskDiff(c *fiber.Ctx) error {
 	}
 	out, err := d.UC.TaskDiff(c.Context(), id)
 	if err != nil {
-		return respondError(c, errors.Wrap(ErrNotFound, err.Error()))
+		return respondError(c, err)
 	}
 	return c.JSON(out)
 }
@@ -100,7 +100,7 @@ func (d Deps) taskDiffRaw(c *fiber.Ctx) error {
 	}
 	raw, err := d.UC.TaskDiffRaw(c.Context(), id)
 	if err != nil {
-		return respondError(c, errors.Wrap(err, "task diff raw"))
+		return respondError(c, err)
 	}
 	c.Set("Content-Type", "text/plain; charset=utf-8")
 	return c.SendString(raw)
@@ -117,7 +117,7 @@ func (d Deps) patchTask(c *fiber.Ctx) error {
 	}
 	t, err := d.UC.PatchTask(c.Context(), id, body.Title, body.Description, body.Variables, body.ExtraInstructions, body.Artifacts, body.Budget)
 	if err != nil {
-		return respondError(c, errors.Wrap(err, "patch task"))
+		return respondError(c, err)
 	}
 	return c.JSON(t)
 }
@@ -129,7 +129,7 @@ func (d Deps) taskEvents(c *fiber.Ctx) error {
 	}
 	ev, err := d.UC.Events(c.Context(), id)
 	if err != nil {
-		return respondError(c, errors.Wrap(err, "task events"))
+		return respondError(c, err)
 	}
 	return c.JSON(ev)
 }
@@ -141,7 +141,7 @@ func (d Deps) listRuns(c *fiber.Ctx) error {
 	}
 	runs, err := d.UC.ListRuns(c.Context(), id)
 	if err != nil {
-		return respondError(c, errors.Wrap(err, "list task runs"))
+		return respondError(c, err)
 	}
 	if runs == nil {
 		runs = []*agentrun.Run{}
@@ -156,7 +156,7 @@ func (d Deps) getRun(c *fiber.Ctx) error {
 	}
 	run, err := d.UC.GetRun(c.Context(), id)
 	if err != nil {
-		return respondError(c, errors.Wrap(ErrNotFound, err.Error()))
+		return respondError(c, err)
 	}
 	return c.JSON(run)
 }
@@ -168,7 +168,7 @@ func (d Deps) run(c *fiber.Ctx) error {
 	}
 	t, err := d.UC.Run(c.Context(), id)
 	if err != nil {
-		return respondError(c, errors.Wrap(err, "run task"))
+		return respondError(c, err)
 	}
 	return c.JSON(t)
 }
@@ -184,7 +184,7 @@ func (d Deps) approve(c *fiber.Ctx) error {
 	}
 	t, err := d.UC.Approve(c.Context(), id, body.Comment)
 	if err != nil {
-		return respondError(c, errors.Wrap(err, "approve task"))
+		return respondError(c, err)
 	}
 	return c.JSON(t)
 }
@@ -200,7 +200,7 @@ func (d Deps) retry(c *fiber.Ctx) error {
 	}
 	t, err := d.UC.Retry(c.Context(), id, body.Comment)
 	if err != nil {
-		return respondError(c, errors.Wrap(err, "retry task"))
+		return respondError(c, err)
 	}
 	return c.JSON(t)
 }
@@ -216,7 +216,7 @@ func (d Deps) returnTo(c *fiber.Ctx) error {
 	}
 	t, err := d.UC.ReturnTo(c.Context(), id, body.ColumnID, body.Comment)
 	if err != nil {
-		return respondError(c, errors.Wrap(err, "return task"))
+		return respondError(c, err)
 	}
 	return c.JSON(t)
 }
@@ -228,7 +228,7 @@ func (d Deps) archive(c *fiber.Ctx) error {
 	}
 	t, err := d.UC.Archive(c.Context(), id)
 	if err != nil {
-		return respondError(c, errors.Wrap(err, "archive task"))
+		return respondError(c, err)
 	}
 	return c.JSON(t)
 }
@@ -240,7 +240,7 @@ func (d Deps) unarchive(c *fiber.Ctx) error {
 	}
 	t, err := d.UC.Unarchive(c.Context(), id)
 	if err != nil {
-		return respondError(c, errors.Wrap(err, "unarchive task"))
+		return respondError(c, err)
 	}
 	return c.JSON(t)
 }

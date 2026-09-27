@@ -33,7 +33,7 @@ type reorderColumnItem struct {
 func (d Deps) listColumns(c *fiber.Ctx) error {
 	cols, err := d.UC.ListColumns(c.Context())
 	if err != nil {
-		return respondError(c, errors.Wrap(err, "list columns"))
+		return respondError(c, err)
 	}
 	return c.JSON(cols)
 }
@@ -48,7 +48,7 @@ func (d Deps) createColumn(c *fiber.Ctx) error {
 	}
 	col, err := d.UC.CreateColumn(c.Context(), body.Name, body.SystemPrompt, body.OrderIndex)
 	if err != nil {
-		return respondError(c, errors.Wrap(err, "create column"))
+		return respondError(c, err)
 	}
 	return c.Status(201).JSON(col)
 }
@@ -64,7 +64,7 @@ func (d Deps) patchColumn(c *fiber.Ctx) error {
 	}
 	col, err := d.UC.PatchColumn(c.Context(), id, body.Name, body.SystemPromptTemplate, body.UserCustomPrompt, body.NameI18n, body.OutputFields, body.Budget, body.RequiresGitDiff)
 	if err != nil {
-		return respondError(c, errors.Wrap(err, "patch column"))
+		return respondError(c, err)
 	}
 	return c.JSON(col)
 }
@@ -75,7 +75,7 @@ func (d Deps) deleteColumn(c *fiber.Ctx) error {
 		return respondError(c, errors.Wrap(err, "delete column"))
 	}
 	if err := d.UC.DeleteColumn(c.Context(), id); err != nil {
-		return respondError(c, errors.Wrap(err, "delete column"))
+		return respondError(c, err)
 	}
 	return c.SendStatus(204)
 }
@@ -87,7 +87,7 @@ func (d Deps) resetOverlay(c *fiber.Ctx) error {
 	}
 	col, err := d.UC.ResetOverlay(c.Context(), id)
 	if err != nil {
-		return respondError(c, errors.Wrap(err, "reset column overlay"))
+		return respondError(c, err)
 	}
 	return c.JSON(col)
 }
@@ -99,7 +99,7 @@ func (d Deps) restoreDefault(c *fiber.Ctx) error {
 	}
 	col, err := d.UC.RestoreDefault(c.Context(), id)
 	if err != nil {
-		return respondError(c, errors.Wrap(err, "restore column default prompt"))
+		return respondError(c, err)
 	}
 	return c.JSON(col)
 }
@@ -114,7 +114,7 @@ func (d Deps) reorder(c *fiber.Ctx) error {
 		ids[i] = b.ID
 	}
 	if err := d.UC.ReorderColumns(c.Context(), ids); err != nil {
-		return respondError(c, errors.Wrap(err, "reorder columns"))
+		return respondError(c, err)
 	}
 	return c.JSON(fiber.Map{"ok": true})
 }

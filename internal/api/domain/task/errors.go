@@ -15,4 +15,5 @@ var (
 	ErrNotArchived       = errors.New("task is not archived")
 	ErrContractInvalid   = errors.New("stage contract is not satisfied")
 	ErrGitDiffRequired   = errors.New("nonempty git diff is required")
+	ErrBudgetExceeded    = errors.New("agent run budget exceeded")
 )

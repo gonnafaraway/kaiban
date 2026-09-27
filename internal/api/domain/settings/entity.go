@@ -9,6 +9,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+
+	"kaiban/internal/api/domain/secret"
 )
 
 // ContextPackItem is an editable project document injected into agent prompts.
@@ -109,14 +111,7 @@ func (s *Settings) ContextPackTitles() []string {
 }
 
 func (s Settings) MaskedKey() string {
-	v := s.LLMAPIKey
-	if v == "" {
-		return ""
-	}
-	if len(v) <= 4 {
-		return "****"
-	}
-	return "****" + v[len(v)-4:]
+	return secret.Mask(s.LLMAPIKey)
 }
 
 // Budget is the effective limit after settings <- column <- task (tighten-only).

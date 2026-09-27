@@ -1,4 +1,4 @@
-package integration
+package llm
 
 import (
 	"context"
@@ -14,7 +14,7 @@ func TestOpenCodeZenLiveChat(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	client := NewOpenAI()
+	client := NewOpenAI(45 * time.Second)
 	msg, err := client.Chat(ctx, "https://opencode.ai/zen/v1", "", "space-bunny-free", []ChatMessage{
 		{Role: "user", Content: "Reply with exactly the word OK and nothing else."},
 	}, nil)

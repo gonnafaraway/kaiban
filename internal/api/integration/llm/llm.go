@@ -1,20 +1,27 @@
-package integration
+// Package llm speaks the OpenAI-compatible /chat/completions protocol.
+package llm
 
 import (
 	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/pkg/errors"
+
+	"kaiban/internal/api/textutil"
 )
+
+// DefaultTimeout is used when the caller passes a non-positive timeout.
+const DefaultTimeout = 10 * time.Minute
+
+// errorBodySnippet is how much of a failing response we quote back to the caller.
+const errorBodySnippet = 800
 
 type ChatMessage struct {
 	Role       string     `json:"role"`
@@ -66,12 +73,10 @@ type chatJSONResponse struct {
 	Error   llmAPIError      `json:"error"`
 }
 
-func NewOpenAI() *OpenAIClient {
-	timeout := 10 * time.Minute
-	if s := os.Getenv("LLM_HTTP_TIMEOUT"); s != "" {
-		if d, err := time.ParseDuration(s); err == nil && d > 0 {
-			timeout = d
-		}
+// NewOpenAI builds a client for long-running agent calls; timeout comes from config.
+func NewOpenAI(timeout time.Duration) *OpenAIClient {
+	if timeout <= 0 {
+		timeout = DefaultTimeout
 	}
 	return &OpenAIClient{HTTP: &http.Client{
 		Timeout: timeout,
@@ -119,8 +124,8 @@ func (c *OpenAIClient) Chat(ctx context.Context, baseURL, apiKey, model string, 
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
-		data, _ := io.ReadAll(resp.Body)
-		return ChatMessage{}, fmt.Errorf("llm http %d: %s", resp.StatusCode, truncate(string(data), 800))
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 32*1024))
+		return ChatMessage{}, errors.Errorf("llm http %d: %s", resp.StatusCode, textutil.TruncateRunes(string(data), errorBodySnippet))
 	}
 	br := bufio.NewReader(resp.Body)
 	head, _ := br.Peek(8)
@@ -132,7 +137,10 @@ func (c *OpenAIClient) Chat(ctx context.Context, baseURL, apiKey, model string, 
 		}
 		return msg, nil
 	}
-	data, _ := io.ReadAll(br)
+	data, err := io.ReadAll(br)
+	if err != nil {
+		return ChatMessage{}, errors.Wrap(err, "read llm body")
+	}
 	msg, err := parseChatJSON(data)
 	if err != nil {
 		return ChatMessage{}, errors.Wrap(err, "parse llm json")
@@ -146,10 +154,10 @@ func parseChatJSON(data []byte) (ChatMessage, error) {
 		return ChatMessage{}, errors.Wrap(err, "decode llm json")
 	}
 	if parsed.Error.Message != "" {
-		return ChatMessage{}, fmt.Errorf("llm: %s", parsed.Error.Message)
+		return ChatMessage{}, errors.Errorf("llm: %s", parsed.Error.Message)
 	}
 	if len(parsed.Choices) == 0 {
-		return ChatMessage{}, fmt.Errorf("llm: empty choices")
+		return ChatMessage{}, errors.New("llm: empty choices")
 	}
 	return parsed.Choices[0].Message, nil
 }
@@ -202,7 +210,7 @@ func parseChatStream(r io.Reader) (ChatMessage, error) {
 			continue
 		}
 		if chunk.Error.Message != "" {
-			return ChatMessage{}, fmt.Errorf("llm: %s", chunk.Error.Message)
+			return ChatMessage{}, errors.Errorf("llm: %s", chunk.Error.Message)
 		}
 		if len(chunk.Choices) == 0 {
 			continue
@@ -239,16 +247,16 @@ func parseChatStream(r io.Reader) (ChatMessage, error) {
 		return ChatMessage{}, errors.Wrap(err, "read llm stream")
 	}
 	if !sawData {
-		return ChatMessage{}, fmt.Errorf("llm: empty stream")
+		return ChatMessage{}, errors.New("llm: empty stream")
 	}
 	if len(calls) > 0 {
-		max := -1
+		last := -1
 		for i := range calls {
-			if i > max {
-				max = i
+			if i > last {
+				last = i
 			}
 		}
-		msg.ToolCalls = make([]ToolCall, max+1)
+		msg.ToolCalls = make([]ToolCall, last+1)
 		for i, tc := range calls {
 			if tc != nil {
 				msg.ToolCalls[i] = *tc
@@ -256,18 +264,15 @@ func parseChatStream(r io.Reader) (ChatMessage, error) {
 		}
 	}
 	if msg.Content == "" && len(msg.ToolCalls) == 0 {
-		return ChatMessage{}, fmt.Errorf("llm: empty choices")
+		return ChatMessage{}, errors.New("llm: empty choices")
 	}
 	return msg, nil
 }
 
-func truncate(s string, n int) string {
-	if n <= 0 {
-		return ""
+// apiBase strips trailing slashes before joining paths.
+func apiBase(base string) string {
+	for len(base) > 0 && base[len(base)-1] == '/' {
+		base = base[:len(base)-1]
 	}
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n]) + "..."
+	return base
 }

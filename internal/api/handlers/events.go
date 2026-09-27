@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+
+	httptransport "kaiban/internal/api/transport/http"
 )
 
 func (d Deps) sse(c *fiber.Ctx) error {
@@ -24,9 +26,9 @@ func (d Deps) sse(c *fiber.Ctx) error {
 					return
 				}
 				var wrap map[string]any
-				ev := "message"
+				ev := httptransport.EventMessage
 				if err := json.Unmarshal(msg, &wrap); err == nil {
-					if s, ok := wrap["event"].(string); ok && s != "" {
+					if s, ok := wrap[httptransport.FieldEvent].(string); ok && s != "" {
 						ev = s
 					}
 				}
