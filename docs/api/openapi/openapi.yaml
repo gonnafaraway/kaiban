@@ -1,0 +1,185 @@
+openapi: 3.0.3
+info:
+  title: Kaiban API
+  version: 0.1.0
+servers:
+  - url: /api/v1
+paths:
+  /health:
+    get:
+      responses:
+        "200":
+          description: ok
+  /me:
+    get:
+      responses:
+        "200":
+          description: current user
+  /settings:
+    get:
+      responses:
+        "200":
+          description: settings
+    put:
+      responses:
+        "200":
+          description: updated
+  /columns:
+    get:
+      responses:
+        "200":
+          description: list
+    post:
+      responses:
+        "201":
+          description: created
+  /columns/reorder:
+    put:
+      responses:
+        "200":
+          description: ok
+  /columns/{id}:
+    patch:
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+    delete:
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: deleted
+  /archive:
+    get:
+      responses:
+        "200":
+          description: archived tasks with reports
+  /tasks:
+    get:
+      responses:
+        "200":
+          description: list
+    post:
+      responses:
+        "201":
+          description: created
+  /tasks/{id}:
+    get:
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: task
+    patch:
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: task
+  /tasks/{id}/run:
+    post:
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: queued
+  /tasks/{id}/approve:
+    post:
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: approved
+  /tasks/{id}/retry:
+    post:
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: retried
+  /tasks/{id}/return:
+    post:
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: returned
+  /tasks/{id}/archive:
+    post:
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: archived
+  /tasks/{id}/unarchive:
+    post:
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: restored to board
+  /integrations:
+    get:
+      responses:
+        "200":
+          description: list
+    post:
+      responses:
+        "201":
+          description: created
+  /mcp-servers:
+    get:
+      responses:
+        "200":
+          description: list
+    post:
+      responses:
+        "201":
+          description: created
+  /events:
+    get:
+      responses:
+        "200":
+          description: SSE stream
