@@ -1,15 +1,10 @@
 package log
 
-import "go.uber.org/zap"
+import (
+	"log/slog"
+	"os"
+)
 
-func NewLogger() (*zap.Logger, error) {
-	return zap.NewProduction()
-}
-
-func NewFallbackLogger() *zap.Logger {
-	l, err := zap.NewDevelopment()
-	if err != nil {
-		return zap.NewNop()
-	}
-	return l
+func NewLogger() *slog.Logger {
+	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 }

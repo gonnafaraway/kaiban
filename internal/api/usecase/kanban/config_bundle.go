@@ -20,12 +20,12 @@ const configBundleVersion = 1
 
 // ConfigBundle is a portable full-app settings snapshot (no tasks / runs / jobs).
 type ConfigBundle struct {
-	Version      int                     `json:"version"`
-	ExportedAt   time.Time               `json:"exported_at"`
-	Settings     *settings.Settings      `json:"settings"`
-	Integrations []ExportedIntegration   `json:"integrations"`
-	MCPServers   []ExportedMCPServer     `json:"mcp_servers"`
-	Columns      []ExportedColumn        `json:"columns"`
+	Version      int                   `json:"version"`
+	ExportedAt   time.Time             `json:"exported_at"`
+	Settings     *settings.Settings    `json:"settings"`
+	Integrations []ExportedIntegration `json:"integrations"`
+	MCPServers   []ExportedMCPServer   `json:"mcp_servers"`
+	Columns      []ExportedColumn      `json:"columns"`
 }
 
 type ExportedIntegration struct {
@@ -47,29 +47,29 @@ type ExportedMCPServer struct {
 }
 
 type ExportedColumn struct {
-	ID                   uuid.UUID             `json:"id"`
-	Name                 string                `json:"name"`
-	NameI18n             map[string]string     `json:"name_i18n"`
-	SystemPromptDefault  string                `json:"system_prompt_default"`
-	SystemPromptTemplate string                `json:"system_prompt_template"`
-	UserCustomPrompt     *string               `json:"user_custom_prompt"`
-	OutputFields         []column.OutputField  `json:"output_fields"`
-	Budget               column.BudgetLimits   `json:"budget"`
-	RequiresGitDiff      bool                  `json:"requires_git_diff"`
-	OrderIndex           int                   `json:"order_index"`
+	ID                   uuid.UUID            `json:"id"`
+	Name                 string               `json:"name"`
+	NameI18n             map[string]string    `json:"name_i18n"`
+	SystemPromptDefault  string               `json:"system_prompt_default"`
+	SystemPromptTemplate string               `json:"system_prompt_template"`
+	UserCustomPrompt     *string              `json:"user_custom_prompt"`
+	OutputFields         []column.OutputField `json:"output_fields"`
+	Budget               column.BudgetLimits  `json:"budget"`
+	RequiresGitDiff      bool                 `json:"requires_git_diff"`
+	OrderIndex           int                  `json:"order_index"`
 }
 
 // ImportResult describes what import did (replace-all for integrations/MCP/columns when provided).
 type ImportResult struct {
-	Mode             string `json:"mode"`
-	Version          int    `json:"version"`
-	SettingsUpdated  bool   `json:"settings_updated"`
-	Integrations     int    `json:"integrations"`
-	MCPServers       int    `json:"mcp_servers"`
-	Columns          int    `json:"columns"`
-	ReplacedIntegrations bool `json:"replaced_integrations"`
-	ReplacedMCP          bool `json:"replaced_mcp_servers"`
-	ReplacedColumns      bool `json:"replaced_columns"`
+	Mode                 string `json:"mode"`
+	Version              int    `json:"version"`
+	SettingsUpdated      bool   `json:"settings_updated"`
+	Integrations         int    `json:"integrations"`
+	MCPServers           int    `json:"mcp_servers"`
+	Columns              int    `json:"columns"`
+	ReplacedIntegrations bool   `json:"replaced_integrations"`
+	ReplacedMCP          bool   `json:"replaced_mcp_servers"`
+	ReplacedColumns      bool   `json:"replaced_columns"`
 }
 
 func (u *UseCase) ExportConfig(ctx context.Context) (*ConfigBundle, error) {

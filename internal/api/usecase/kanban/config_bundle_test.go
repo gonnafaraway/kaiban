@@ -4,7 +4,7 @@ import "testing"
 
 func TestScrubSecretMap(t *testing.T) {
 	in := map[string]string{
-		"token": "secret-value",
+		"token":  "secret-value",
 		"masked": "****abcd",
 		"empty":  "",
 	}

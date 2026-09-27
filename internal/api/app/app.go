@@ -3,8 +3,6 @@ package app
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"kaiban/internal/api/env"
 	"kaiban/internal/api/handlers"
 	"kaiban/internal/api/infrastructure/local/log"
@@ -21,11 +19,7 @@ func Run() error {
 	if err != nil {
 		return err
 	}
-	logger, err := log.NewLogger()
-	if err != nil {
-		logger = log.NewFallbackLogger()
-		logger.Warn("using fallback logger", zap.Error(err))
-	}
+	logger := log.NewLogger()
 
 	storages, err := storage.PrepareStorage(e)
 	if err != nil {
@@ -34,10 +28,7 @@ func Run() error {
 	if err := pg.ApplySchema(context.Background(), storages, e); err != nil {
 		return err
 	}
-	repo, err := pg.PrepareRepository(storages)
-	if err != nil {
-		return err
-	}
+	repo := pg.PrepareRepository(storages)
 	hub := httptransport.NewHub()
 	uc := kanban.Prepare(repo, integration.NewOpenAI(), e.GitWorkDir, hub)
 	fiberApp := httptransport.NewApp(logger)

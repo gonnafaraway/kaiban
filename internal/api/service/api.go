@@ -2,10 +2,10 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"go.uber.org/zap"
 
 	"kaiban/internal/api/domain/job"
 	"kaiban/internal/api/repository"
@@ -15,15 +15,15 @@ import (
 type APIService struct {
 	addr string
 	app  *fiber.App
-	log  *zap.Logger
+	log  *slog.Logger
 }
 
-func PrepareAPIService(addr string, app *fiber.App, log *zap.Logger) *APIService {
+func PrepareAPIService(addr string, app *fiber.App, log *slog.Logger) *APIService {
 	return &APIService{addr: addr, app: app, log: log}
 }
 
 func (s *APIService) Run() error {
-	s.log.Info("http listen", zap.String("addr", s.addr))
+	s.log.Info("http listen", "addr", s.addr)
 	return s.app.Listen(s.addr)
 }
 
@@ -31,10 +31,10 @@ type JobsService struct {
 	repo *repository.Repository
 	uc   *kanban.UseCase
 	n    int
-	log  *zap.Logger
+	log  *slog.Logger
 }
 
-func PrepareJobsService(repo *repository.Repository, uc *kanban.UseCase, n int, log *zap.Logger) *JobsService {
+func PrepareJobsService(repo *repository.Repository, uc *kanban.UseCase, n int, log *slog.Logger) *JobsService {
 	if n < 1 {
 		n = 1
 	}
@@ -59,7 +59,7 @@ func (s *JobsService) Run() error {
 		}
 		jobs, err := s.repo.Jobs.Lease(ctx, free, jobLease)
 		if err != nil {
-			s.log.Error("lease", zap.Error(err))
+			s.log.Error("lease", "error", err)
 			continue
 		}
 		for _, j := range jobs {
@@ -87,7 +87,7 @@ func (s *JobsService) handle(j *job.Job) {
 				return
 			case <-t.C:
 				if err := s.repo.Jobs.RenewLease(context.Background(), j.ID, jobLease); err != nil {
-					s.log.Warn("renew lease", zap.Error(err), zap.String("job", j.ID.String()))
+					s.log.Warn("renew lease", "error", err, "job", j.ID.String())
 				}
 			}
 		}
@@ -101,9 +101,9 @@ func (s *JobsService) handle(j *job.Job) {
 	if err != nil {
 		st = job.StatusFailed
 		msg = err.Error()
-		s.log.Error("job", zap.Error(err), zap.String("job", j.ID.String()))
+		s.log.Error("job", "error", err, "job", j.ID.String())
 	}
 	if err := s.repo.Jobs.Complete(context.Background(), j.ID, st, msg); err != nil {
-		s.log.Error("complete job", zap.Error(err), zap.String("job", j.ID.String()))
+		s.log.Error("complete job", "error", err, "job", j.ID.String())
 	}
 }

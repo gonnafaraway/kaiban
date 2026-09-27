@@ -20,7 +20,7 @@ import (
 	"kaiban/internal/api/storage"
 )
 
-func PrepareRepository(st *storage.Storage) (*repository.Repository, error) {
+func PrepareRepository(st *storage.Storage) *repository.Repository {
 	s := New(st.Postgres)
 	return &repository.Repository{
 		Columns:      columnRepo{s},
@@ -32,7 +32,7 @@ func PrepareRepository(st *storage.Storage) (*repository.Repository, error) {
 		Integrations: intRepo{s},
 		MCP:          mcpRepo{s},
 		AgentRuns:    agentRunRepo{s},
-	}, nil
+	}
 }
 
 type columnRepo struct{ s *Store }

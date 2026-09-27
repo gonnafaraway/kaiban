@@ -3,55 +3,52 @@ package env
 import (
 	"os"
 
+	carloenv "github.com/caarlos0/env/v11"
 	"github.com/joho/godotenv"
 )
 
 type Env struct {
-	HTTPAddr        string
-	DatabaseURL     string
-	GitWorkDir      string
-	WorkerN         int
-	LLMBaseURL      string
-	LLMAPIKey       string
-	LLMModel        string
-	JiraURL         string
-	JiraEmail       string
-	JiraToken       string
-	ConfluenceURL   string
-	ConfluenceEmail string
-	ConfluenceToken string
-	GitLabURL       string
-	GitLabToken     string
-	GitHubURL       string
-	GitHubToken     string
+	HTTPAddr        string `env:"HTTP_ADDR" envDefault:":8080"`
+	DatabaseURL     string `env:"DATABASE_URL" envDefault:"postgres://kaiban:kaiban@localhost:5433/kaiban?sslmode=disable"`
+	GitWorkDir      string `env:"GIT_WORK_DIR" envDefault:"/tmp/kaiban-git"`
+	WorkerN         int    `env:"WORKER_N" envDefault:"2"`
+	LLMBaseURL      string `env:"OPENAI_API_BASE" envDefault:"https://api.openai.com/v1"`
+	LLMAPIKey       string `env:"OPENAI_API_KEY"`
+	LLMModel        string `env:"OPENAI_MODEL" envDefault:"gpt-4.1"`
+	JiraURL         string `env:"JIRA_URL"`
+	JiraEmail       string `env:"JIRA_EMAIL"`
+	JiraToken       string `env:"JIRA_TOKEN"`
+	ConfluenceURL   string `env:"CONFLUENCE_URL"`
+	ConfluenceEmail string `env:"CONFLUENCE_EMAIL"`
+	ConfluenceToken string `env:"CONFLUENCE_TOKEN"`
+	GitLabURL       string `env:"GITLAB_URL"`
+	GitLabToken     string `env:"GITLAB_TOKEN"`
+	GitHubURL       string `env:"GITHUB_URL" envDefault:"https://api.github.com"`
+	GitHubToken     string `env:"GITHUB_TOKEN"`
 }
 
 func PrepareEnv() (*Env, error) {
 	_ = godotenv.Load()
-	return &Env{
-		HTTPAddr:        getenv("HTTP_ADDR", ":8080"),
-		DatabaseURL:     getenv("DATABASE_URL", "postgres://kaiban:kaiban@localhost:5433/kaiban?sslmode=disable"),
-		GitWorkDir:      getenv("GIT_WORK_DIR", "/tmp/kaiban-git"),
-		WorkerN:         2,
-		LLMBaseURL:      getenv("OPENAI_API_BASE", getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")),
-		LLMAPIKey:       getenv("OPENAI_API_KEY", ""),
-		LLMModel:        getenv("OPENAI_MODEL", "gpt-4.1"),
-		JiraURL:         getenv("JIRA_URL", ""),
-		JiraEmail:       getenv("JIRA_EMAIL", ""),
-		JiraToken:       getenv("JIRA_TOKEN", getenv("JIRA_API_TOKEN", "")),
-		ConfluenceURL:   getenv("CONFLUENCE_URL", ""),
-		ConfluenceEmail: getenv("CONFLUENCE_EMAIL", ""),
-		ConfluenceToken: getenv("CONFLUENCE_TOKEN", ""),
-		GitLabURL:       getenv("GITLAB_URL", ""),
-		GitLabToken:     getenv("GITLAB_TOKEN", getenv("GITLAB_PRIVATE_TOKEN", "")),
-		GitHubURL:       getenv("GITHUB_URL", getenv("GITHUB_API_BASE", "https://api.github.com")),
-		GitHubToken:     getenv("GITHUB_TOKEN", getenv("GH_TOKEN", "")),
-	}, nil
+	// Preserve alternate names used by the previous custom getenv fallbacks.
+	prefer("OPENAI_API_BASE", "OPENAI_BASE_URL")
+	prefer("JIRA_TOKEN", "JIRA_API_TOKEN")
+	prefer("GITLAB_TOKEN", "GITLAB_PRIVATE_TOKEN")
+	prefer("GITHUB_URL", "GITHUB_API_BASE")
+	prefer("GITHUB_TOKEN", "GH_TOKEN")
+
+	var e Env
+	if err := carloenv.Parse(&e); err != nil {
+		return nil, err
+	}
+	return &e, nil
 }
 
-func getenv(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
+// prefer copies fallback into primary when primary is unset or empty.
+func prefer(primary, fallback string) {
+	if os.Getenv(primary) != "" {
+		return
 	}
-	return def
+	if v := os.Getenv(fallback); v != "" {
+		_ = os.Setenv(primary, v)
+	}
 }

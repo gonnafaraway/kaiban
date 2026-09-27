@@ -1,9 +1,10 @@
 package middleware
 
 import (
+	"log/slog"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	"go.uber.org/zap"
 )
 
 func RequestID() fiber.Handler {
@@ -18,14 +19,14 @@ func RequestID() fiber.Handler {
 	}
 }
 
-func Log(log *zap.Logger) fiber.Handler {
+func Log(log *slog.Logger) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		err := c.Next()
 		log.Info("http",
-			zap.String("method", c.Method()),
-			zap.String("path", c.Path()),
-			zap.Int("status", c.Response().StatusCode()),
-			zap.String("request_id", c.Get("X-Request-ID")),
+			"method", c.Method(),
+			"path", c.Path(),
+			"status", c.Response().StatusCode(),
+			"request_id", c.Get("X-Request-ID"),
 		)
 		return err
 	}
